@@ -39,7 +39,7 @@ from ballsdex.core.utils.transformers import (
     TradeCommandType,
     RegimeTransform,
 )
-from ballsdex.core.image_generator. image_gen import draw_card
+from ballsdex.core.image_generator.image_gen import draw_card
 from ballsdex.core.utils.utils import can_mention, inventory_privacy, is_staff
 from ballsdex.packages.balls.countryballs_paginator import CountryballsViewer
 from ballsdex.settings import settings
@@ -135,10 +135,7 @@ class Balls(commands.GroupCog, group_name=settings.players_group_cog_name):
         self.bot = bot
         self.frame_memory = {}
 
-
-
     @app_commands.command()
-    @app_commands.checks.cooldown(1, 45, key=lambda i: i.user.id)
     async def list(
         self,
         interaction: discord.Interaction["BallsDexBot"],
@@ -174,7 +171,11 @@ class Balls(commands.GroupCog, group_name=settings.players_group_cog_name):
         try:
             player = await Player.get(discord_id=user_obj.id)
         except DoesNotExist:
-            msg = f"You don't have any {settings.plural_collectible_name} yet." if user_obj == interaction.user else f"{user_obj.name} doesn't have any {settings.plural_collectible_name} yet."
+            msg = (
+                f"You don't have any {settings.plural_collectible_name} yet."
+                if user_obj == interaction.user
+                else f"{user_obj.name} doesn't have any {settings.plural_collectible_name} yet."
+            )
             await interaction.followup.send(msg)
             return
 
@@ -189,8 +190,7 @@ class Balls(commands.GroupCog, group_name=settings.players_group_cog_name):
 
             if is_blocked and not is_staff(interaction):
                 await interaction.followup.send(
-                    "You cannot view this user's countryballs.",
-                    ephemeral=True
+                    "You cannot view this user's countryballs.", ephemeral=True
                 )
                 return
 
@@ -199,8 +199,7 @@ class Balls(commands.GroupCog, group_name=settings.players_group_cog_name):
 
             if not allowed:
                 await interaction.followup.send(
-                    "This user's inventory is private.",
-                    ephemeral=True
+                    "This user's inventory is private.", ephemeral=True
                 )
                 return
 
@@ -238,7 +237,7 @@ class Balls(commands.GroupCog, group_name=settings.players_group_cog_name):
             if user_obj == interaction.user:
                 await interaction.followup.send(
                     f"You don't have any {combined} {settings.plural_collectible_name} yet.",
-                    ephemeral=True
+                    ephemeral=True,
                 )
             else:
                 await interaction.followup.send(
@@ -262,7 +261,7 @@ class Balls(commands.GroupCog, group_name=settings.players_group_cog_name):
                 countryballs_list = sorted(
                     all_balls,
                     key=lambda bi: (-bi.favorite, bi.special.name if bi.special else ""),
-                    reverse=reverse  # applies reverse if requested
+                    reverse=reverse,  # applies reverse if requested
                 )
                 for ball_id, _ in count_map.most_common():  # most duplicates first
                     countryballs_list.extend(grouped_map[ball_id])
@@ -281,11 +280,20 @@ class Balls(commands.GroupCog, group_name=settings.players_group_cog_name):
             countryballs_list = list(await query.limit(MAX_ITEMS))
 
         # info content
-        info_content = f"Showing first **{MAX_ITEMS} of {total} {settings.plural_collectible_name}.**\n\n*Use more specific filters to find what you’re looking for.*" if total > MAX_ITEMS else None
+        info_content = (
+            f"Showing first **{MAX_ITEMS} of {total} {settings.plural_collectible_name}.**\n\n*Use more specific filters to find what you’re looking for.*"
+            if total > MAX_ITEMS
+            else None
+        )
 
         # Paginator
         paginator = CountryballsViewer(interaction, countryballs_list)
-        content = info_content if user_obj == interaction.user else f"Viewing {user_obj.name}'s {settings.plural_collectible_name}" + (f" - {info_content}" if info_content else "")
+        content = (
+            info_content
+            if user_obj == interaction.user
+            else f"Viewing {user_obj.name}'s {settings.plural_collectible_name}"
+            + (f" - {info_content}" if info_content else "")
+        )
         await paginator.start(content=content)
 
     @app_commands.command()
@@ -380,10 +388,7 @@ class Balls(commands.GroupCog, group_name=settings.players_group_cog_name):
             return
 
         owned_countryballs = set(
-            x[0]
-            for x in await BallInstance.filter(**filters)
-            .distinct()
-            .values_list("ball_id")
+            x[0] for x in await BallInstance.filter(**filters).distinct().values_list("ball_id")
         )
 
         entries: list[tuple[str, str]] = []
@@ -422,7 +427,10 @@ class Balls(commands.GroupCog, group_name=settings.players_group_cog_name):
             entries.append((f"__**Owned {settings.plural_collectible_name}**__", "Nothing yet."))
 
         if missing := set(y for x, y in bot_countryballs.items() if x not in owned_countryballs):
-            fill_fields(f"Missing {settings.plural_collectible_name}{f' ({regime.name})' if regime else ''}", missing)
+            fill_fields(
+                f"Missing {settings.plural_collectible_name}{f' ({regime.name})' if regime else ''}",
+                missing,
+            )
         else:
             entries.append(
                 (
@@ -430,7 +438,7 @@ class Balls(commands.GroupCog, group_name=settings.players_group_cog_name):
                     "congratulations! :tada:**__",
                     "\u200b",
                 )
-            ) 
+            )
 
         source = FieldPageSource(entries, per_page=5, inline=False, clear_description=False)
         special_str = f" ({special.name})" if special else ""
@@ -465,7 +473,7 @@ class Balls(commands.GroupCog, group_name=settings.players_group_cog_name):
         user_obj = user or interaction.user
         await interaction.response.defer(thinking=True)
         extra_text = f"{special.name} " if special else ""
-        
+
         # Handle user parameter and privacy checks
         if user is not None:
             try:
@@ -498,7 +506,7 @@ class Balls(commands.GroupCog, group_name=settings.players_group_cog_name):
                     f"You don't have any {extra_text}{settings.plural_collectible_name} yet."
                 )
                 return
-        
+
         # Filter for UNOBTAINABLE balls only (disabled balls)
         # These are balls that can no longer be obtained through normal gameplay
         unobtainable_balls = {x: y.emoji_id for x, y in balls.items() if not y.enabled}
@@ -523,7 +531,7 @@ class Balls(commands.GroupCog, group_name=settings.players_group_cog_name):
             unobtainable_balls = {
                 x: y.emoji_id
                 for x, y in balls.items()
-                if not y.enabled and any(s == special for s in getattr(y, 'specials', []))
+                if not y.enabled and any(s == special for s in getattr(y, "specials", []))
             }
 
         total_unobtainable = len(unobtainable_balls)
@@ -537,25 +545,27 @@ class Balls(commands.GroupCog, group_name=settings.players_group_cog_name):
             return
 
         percentage = (owned_unobtainable / total_unobtainable) * 100
-        
+
         # Prepare completion fields
         fields = []
-        
+
         # Add main stats
         fields.append(
-            ("🔒 Unobtainable Progress", 
-             f"**{owned_unobtainable}/{total_unobtainable}** ({percentage:.1f}%)")
-        )
-        
-        if special:
-            fields.append(
-                ("🎯 Special Event", f"{special.name}")
+            (
+                "🔒 Unobtainable Progress",
+                f"**{owned_unobtainable}/{total_unobtainable}** ({percentage:.1f}%)",
             )
+        )
+
+        if special:
+            fields.append(("🎯 Special Event", f"{special.name}"))
 
         # Add explanation of what unobtainable means
         fields.append(
-            ("ℹ️ About Unobtainable", 
-             "These are disabled balls that can no longer be obtained through normal gameplay.")
+            (
+                "ℹ️ About Unobtainable",
+                "These are disabled balls that can no longer be obtained through normal gameplay.",
+            )
         )
 
         # Show owned unobtainable balls
@@ -568,12 +578,14 @@ class Balls(commands.GroupCog, group_name=settings.players_group_cog_name):
                     owned_names.append(f"{emoji} {ball.country}")
                 else:
                     owned_names.append(f"❓ {ball.country}")
-        
+
         if owned_names:
             # Split into chunks if too long
             chunk_size = 10
-            chunks = [owned_names[i:i + chunk_size] for i in range(0, len(owned_names), chunk_size)]
-            
+            chunks = [
+                owned_names[i : i + chunk_size] for i in range(0, len(owned_names), chunk_size)
+            ]
+
             for i, chunk in enumerate(chunks):
                 field_name = "✅ Owned Unobtainable" if i == 0 else f"✅ Owned (cont. {i+1})"
                 fields.append((field_name, "\n".join(chunk)))
@@ -590,23 +602,28 @@ class Balls(commands.GroupCog, group_name=settings.players_group_cog_name):
                         missing_names.append(f"{emoji} {ball.country}")
                     else:
                         missing_names.append(f"❓ {ball.country}")
-            
+
             if missing_names:
                 # Split into chunks if too long
                 chunk_size = 10
-                chunks = [missing_names[i:i + chunk_size] for i in range(0, len(missing_names), chunk_size)]
-                
+                chunks = [
+                    missing_names[i : i + chunk_size]
+                    for i in range(0, len(missing_names), chunk_size)
+                ]
+
                 for i, chunk in enumerate(chunks):
-                    field_name = "❌ Missing Unobtainable" if i == 0 else f"❌ Missing (cont. {i+1})"
+                    field_name = (
+                        "❌ Missing Unobtainable" if i == 0 else f"❌ Missing (cont. {i+1})"
+                    )
                     fields.append((field_name, "\n".join(chunk)))
 
         # Create embed with appropriate color
         embed_color = 0x9932CC if percentage == 100 else 0x8A2BE2 if percentage >= 75 else 0x4B0082
         embed = discord.Embed(
             title=f"{user_obj.display_name}'s {extra_text}Unobtainable Collection",
-            color=embed_color
+            color=embed_color,
         )
-        
+
         # Add progress bar
         progress_length = 20
         filled_length = int(progress_length * percentage // 100)
@@ -624,7 +641,7 @@ class Balls(commands.GroupCog, group_name=settings.players_group_cog_name):
             paginator.embed.title = embed.title
             paginator.embed.description = embed.description
             paginator.embed.color = embed.color
-            
+
             pages = Pages(source=paginator, interaction=interaction, compact=True)
             await pages.start()
 
@@ -661,12 +678,14 @@ class Balls(commands.GroupCog, group_name=settings.players_group_cog_name):
         entries = []
         max_len = 1000
         for rarity in sortedRarities:
-            collectible_names = "\n".join([f"\u200b ⋄ {c.country}" for c in rarityToCollectibles[rarity]])
+            collectible_names = "\n".join(
+                [f"\u200b ⋄ {c.country}" for c in rarityToCollectibles[rarity]]
+            )
 
             # Split into chunks
             start = 0
             while start < len(collectible_names):
-                chunk = collectible_names[start:start+max_len]
+                chunk = collectible_names[start : start + max_len]
                 start += max_len
                 entry = (f"★ Rarity: {rarity}", chunk)
                 entries.append(entry)
@@ -702,7 +721,6 @@ class Balls(commands.GroupCog, group_name=settings.players_group_cog_name):
         content, file, view = await countryball.prepare_for_message(interaction)
         await interaction.followup.send(content=content, file=file, view=view)
         file.close()
-
 
     @app_commands.command()
     @app_commands.checks.cooldown(1, 60, key=lambda i: i.user.id)
@@ -896,7 +914,8 @@ class Balls(commands.GroupCog, group_name=settings.players_group_cog_name):
             return
         if new_player.donation_policy == DonationPolicy.ALWAYS_DENY:
             await interaction.followup.send(
-                "This player does not accept donations. You can use trades instead.", ephemeral=True
+                "This player does not accept donations. You can use trades instead.",
+                ephemeral=True,
             )
             await countryball.unlock()
             return
@@ -905,17 +924,22 @@ class Balls(commands.GroupCog, group_name=settings.players_group_cog_name):
         if new_player.donation_policy == DonationPolicy.FRIENDS_ONLY:
             if not friendship:
                 await interaction.followup.send(
-                    "This player only accepts donations from friends, use trades instead.", ephemeral=True
+                    "This player only accepts donations from friends, use trades instead.",
+                    ephemeral=True,
                 )
                 await countryball.unlock()
                 return
         blocked = await new_player.is_blocked(old_player)
         if blocked:
-            await interaction.followup.send("You cannot interact with a user that has blocked you.", ephemeral=True)
+            await interaction.followup.send(
+                "You cannot interact with a user that has blocked you.", ephemeral=True
+            )
             await countryball.unlock()
             return
         if new_player.discord_id in self.bot.blacklist:
-            await interaction.followup.send("You cannot donate to a blacklisted user.", ephemeral=True)
+            await interaction.followup.send(
+                "You cannot donate to a blacklisted user.", ephemeral=True
+            )
             await countryball.unlock()
             return
         elif new_player.donation_policy == DonationPolicy.REQUEST_APPROVAL:
@@ -998,74 +1022,6 @@ class Balls(commands.GroupCog, group_name=settings.players_group_cog_name):
             f"You have {balls} {special_str}"
             f"{country}{settings.collectible_name}{plural}{guild}."
         )
-
-    @app_commands.command()
-    @app_commands.checks.cooldown(1, 60, key=lambda i: i.user.id)
-    async def duplicate(
-        self, interaction: discord.Interaction["BallsDexBot"], type: DuplicateType
-    ):
-        """
-        Shows your most duplicated countryballs or specials.
-
-        Parameters
-        ----------
-        type: DuplicateType
-            Type of duplicate to check (countryballs or specials).
-        """
-        await interaction.response.defer(thinking=True, ephemeral=True)
-
-        player, _ = await Player.get_or_create(discord_id=interaction.user.id)
-        await player.fetch_related("balls")
-        is_special = type.value == "specials"
-        queryset = BallInstance.filter(player=player)
-
-        if is_special:
-            queryset = queryset.filter(special_id__isnull=False).prefetch_related("special")
-            annotations = {"name": "special__name", "emoji": "special__emoji"}
-            title = "special"
-            limit = 5
-        else:
-            queryset = queryset.filter(ball__tradeable=True)
-            annotations = {"name": "ball__country", "emoji": "ball__emoji_id"}
-            title = settings.collectible_name
-            limit = 50
-
-        results = (
-            await queryset.annotate(count=Count("id"))
-            .group_by(*annotations.values())
-            .order_by("-count")
-            .limit(limit)
-            .values(*annotations.values(), "count")
-        )
-
-        if not results:
-            await interaction.followup.send(
-                f"You don't have any {type.value} duplicates in your inventory.", ephemeral=True
-            )
-            return
-
-        entries = [
-            (
-                f"{i + 1}. {item[annotations['name']]} "
-                f"{self.bot.get_emoji(item[annotations['emoji']]) or item[annotations['emoji']]}",
-                f"Count: {item['count']}",
-            )
-            for i, item in enumerate(results)
-        ]
-
-        embed_title = (
-            f"Top {len(results)} duplicate {title}s:"
-            if len(results) > 1
-            else f"Top {len(results)} duplicate {title}"
-        )
-
-        source = FieldPageSource(entries, per_page=5 if is_special else 10, inline=False)
-        source.embed.title = embed_title
-        source.embed.color = discord.Color.purple() if is_special else discord.Color.blue()
-        source.embed.set_thumbnail(url=interaction.user.display_avatar.url)
-
-        paginator = Pages(source, interaction=interaction)
-        await paginator.start(ephemeral=True)
 
     @app_commands.command()
     @app_commands.checks.cooldown(1, 60, key=lambda i: i.user.id)

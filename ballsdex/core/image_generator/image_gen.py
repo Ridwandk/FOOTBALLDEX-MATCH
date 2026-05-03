@@ -123,7 +123,7 @@ def draw_card(ball_instance: "BallInstance", media_path: str = "./admin_panel/me
         (30, 1870),
         # Modifying the line below is breaking the licence as you are removing credits
         # If you don't want to receive a DMCA, just don't
-        "Property & Licensed by El Laggron\n" f"Owners: Alfie,Snape",
+        "Property & Licensed by El Laggron\n" f"Owners: Alfie,Snape.Thom",
         font=credits_font,
         fill=(230, 230, 230, 255),
         stroke_width=0,

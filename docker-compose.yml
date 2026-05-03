@@ -32,7 +32,7 @@ services:
     image: ballsdex
     build: .
     ports:
-      - "8000:8000"
+      - "8001:8000"
     networks:
       - internal
     environment:
@@ -70,7 +70,7 @@ services:
       "
 
   postgres-db:
-    image: postgres
+    image: postgres:15
     restart: always
     hostname: postgres
     shm_size: 1g

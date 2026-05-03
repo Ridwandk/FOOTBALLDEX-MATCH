@@ -4,7 +4,7 @@ from discord import app_commands
 from collections import Counter
 from datetime import datetime, timedelta, timezone
 import io
-from tortoise.expressions import RawSQL  
+from tortoise.expressions import RawSQL
 import random
 from discord import Embed, Color, File
 from tortoise import models, fields
@@ -13,6 +13,7 @@ from discord.ui import View
 import asyncio
 from tortoise.exceptions import DoesNotExist
 import logging
+
 logger = logging.getLogger(__name__)
 from ballsdex.core.utils.transformers import (
     BallTransform,
@@ -34,7 +35,7 @@ from ballsdex.settings import settings
 from ballsdex.core.bot import BallsDexBot
 import ballsdex.packages.config.components as Components
 from collections import defaultdict
-from ballsdex.core.image_generator. image_gen import draw_card
+from ballsdex.core.image_generator.image_gen import draw_card
 from io import BytesIO
 from ballsdex.core.utils.transformers import (
     BallEnabledTransform,
@@ -63,45 +64,56 @@ daily_usage_tracking = {}
 
 # Owners who can give packs
 ownersid = {
-    1079166030166896711,
-    917048116115542016,
+    1096501882224136222,
+    837377495530602516,
     784414771993903125,
     749658746535280771,
-    767663084890226689,
+    1231339940382638080,
     1184739489315299339,
     257972292645027841,
     1119377053054148719,
-    235773607119290369,
-    844513025820983318 
+    596428982694707240,
+    844513025820983318,
 }
 
 # Cooldowns
 DAILY_COOLDOWN = timedelta(hours=24)
 WEEKLY_COOLDOWN = timedelta(days=7)
-gamble_cooldowns = {} 
+gamble_cooldowns = {}
 
-#Dictionaries
+# Dictionaries
 packly_pool = defaultdict(int)
 
 
 class SkipView(View):
     """View for skip button during multipack opening"""
-    def __init__(self):
+
+    def __init__(self, user_id: int):
         super().__init__(timeout=60)
         self.skipped = False
+        self.user_id = user_id
+        self.skip_event = asyncio.Event()
 
     @discord.ui.button(label="Skip Animation", style=discord.ButtonStyle.secondary, emoji="⏭️")
     async def skip_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        # Guaranteed check inside the callback so it doesn't crash or bypass the view
+        if interaction.user.id != self.user_id:
+            await interaction.response.send_message(
+                "❌ Only the person opening the packs can skip!", ephemeral=True
+            )
+            return
+
         self.skipped = True
+        self.skip_event.set()
         button.label = "Skipped ✓"
         button.disabled = True
         button.style = discord.ButtonStyle.success
-        
+
         # Update embed to show skip confirmation
         current_embed = interaction.message.embeds[0]
         current_embed.description = "⏩ **Animation skipped! Showing final results...**"
         current_embed.color = Color.green()
-        
+
         await interaction.response.edit_message(embed=current_embed, view=self)
         self.stop()
 
@@ -116,7 +128,6 @@ class Claim(commands.GroupCog, name="packs"):
         self.bot_tutorial_seen = set()
         self.bot_walletturorial_seen = set()
         super().__init__()
-    
 
     owners = app_commands.Group(name="owners", description="Owner-only commands")
 
@@ -126,29 +137,30 @@ class Claim(commands.GroupCog, name="packs"):
         Returns None if no special is selected or available.
         """
         now = datetime.now(timezone.utc)
-        
+
         # Get all active specials that respect date restrictions
         try:
             from tortoise.expressions import Q
+
             active_specials = await Special.filter(
                 # Check start_date and end_date constraints
                 Q(start_date__isnull=True) | Q(start_date__lte=now),
                 Q(end_date__isnull=True) | Q(end_date__gte=now),
                 # Only include specials that are not hidden
-                hidden=False
+                hidden=False,
             ).all()
         except:
             # Fallback if Q import fails
             active_specials = await Special.all()
-        
+
         if not active_specials:
             return None
-        
+
         # Apply rarity probability for each special
         for special in active_specials:
             if random.random() < special.rarity:
                 return special
-        
+
         return None
 
     async def _start_worker_manager(self):
@@ -158,16 +170,16 @@ class Claim(commands.GroupCog, name="packs"):
         while True:
             # Get the task from the async queue
             user_id, packs, interaction = await self.pack_queue.get()
-            
+
             # Create a new task to process this request concurrently.
             asyncio.create_task(
                 self._process_multipackly_and_clean_up(user_id, packs, interaction)
             )
-            
+
             # Mark the queue task as done, allowing it to move to the next item
             self.pack_queue.task_done()
 
-        # Compatibility shim — place this inside the Claim cog class,
+    # Compatibility shim — place this inside the Claim cog class,
     # at the same indentation level as multipackly and other methods.
     async def _process_multipackly(self, user_id, packs, interaction):
         """
@@ -176,7 +188,7 @@ class Claim(commands.GroupCog, name="packs"):
         your existing worker implementation name.
         """
         return await self._process_multipackly_and_clean_up(user_id, packs, interaction)
-    
+
     async def _process_multipackly_and_clean_up(self, user_id, packs, interaction):
         """
         This is a wrapper function that runs the main process and ensures cleanup.
@@ -188,11 +200,12 @@ class Claim(commands.GroupCog, name="packs"):
             try:
                 # On error, send an ephemeral message
                 await interaction.followup.send(
-                    f"❌ An unexpected error occurred while opening your packs.",
-                    ephemeral=True
+                    f"❌ An unexpected error occurred while opening your packs.", ephemeral=True
                 )
             except discord.NotFound:
-                logger.warning(f"Could not send error message for user {user_id} - interaction not found.")
+                logger.warning(
+                    f"Could not send error message for user {user_id} - interaction not found."
+                )
         finally:
             # This is the crucial cleanup step for both success and failure
             self.active_users.discard(user_id)
@@ -215,13 +228,13 @@ class Claim(commands.GroupCog, name="packs"):
             if 5.0 <= ball.rarity <= 30.0:
                 rarity_weight = 1600  # common
             elif 2.5 <= ball.rarity < 5.0:
-                rarity_weight = 600   # decent
+                rarity_weight = 600  # decent
             elif 1.5 <= ball.rarity < 2.5:
                 rarity_weight = 300  # rare
             elif 0.5 < ball.rarity < 1.5:
                 rarity_weight = 100  # very rare
             elif 0.1 < ball.rarity < 0.5:
-                rarity_weight = 30 # very very rare 
+                rarity_weight = 30  # very very rare
             elif 0.01 <= ball.rarity <= 0.1:
                 rarity_weight = 20  # ultra rare
 
@@ -237,8 +250,15 @@ class Claim(commands.GroupCog, name="packs"):
 
         return random.choice(choices)
 
-        # put this inside your Cog class (same indentation as other methods)
-    async def safe_send_pinged_embed(self, interaction: discord.Interaction, user: discord.User, embed: discord.Embed, *, content_mention: str | None = None):
+    # put this inside your Cog class (same indentation as other methods)
+    async def safe_send_pinged_embed(
+        self,
+        interaction: discord.Interaction,
+        user: discord.User,
+        embed: discord.Embed,
+        *,
+        content_mention: str | None = None,
+    ):
         """
         Safely send an embed that pings `user`. Tries:
         1) interaction.response.send_message (if available)
@@ -252,7 +272,9 @@ class Claim(commands.GroupCog, name="packs"):
         # 1) Try to send as the interaction response if it hasn't been used
         try:
             if not interaction.response.is_done():
-                await interaction.response.send_message(content=content, embed=embed, allowed_mentions=allowed)
+                await interaction.response.send_message(
+                    content=content, embed=embed, allowed_mentions=allowed
+                )
                 return
         except discord.InteractionResponded:
             # already responded between check and send; fall through to followup
@@ -275,7 +297,9 @@ class Claim(commands.GroupCog, name="packs"):
         # 3) Final fallback: send directly to the channel
         try:
             if interaction.channel:
-                await interaction.channel.send(content=content, embed=embed, allowed_mentions=allowed)
+                await interaction.channel.send(
+                    content=content, embed=embed, allowed_mentions=allowed
+                )
                 return
         except Exception:
             # give up but log if possible
@@ -284,6 +308,7 @@ class Claim(commands.GroupCog, name="packs"):
                     self.bot.logger.exception("safe_send_pinged_embed: all send attempts failed")
                 else:
                     import traceback, sys
+
                     print("safe_send_pinged_embed: all send attempts failed", file=sys.stderr)
                     traceback.print_exc()
             except Exception:
@@ -295,53 +320,47 @@ class Claim(commands.GroupCog, name="packs"):
         Returns (can_use, remaining_uses)
         """
         now = datetime.now(timezone.utc)
-        
+
         if user_id not in daily_usage_tracking:
             # First time using daily command
-            daily_usage_tracking[user_id] = {
-                'count': 0,
-                'first_use': now
-            }
+            daily_usage_tracking[user_id] = {"count": 0, "first_use": now}
             return True, 3
-        
+
         user_data = daily_usage_tracking[user_id]
-        time_since_first_use = now - user_data['first_use']
-        
+        time_since_first_use = now - user_data["first_use"]
+
         # Reset if 24 hours have passed since first use
         if time_since_first_use >= DAILY_COOLDOWN:
-            daily_usage_tracking[user_id] = {
-                'count': 0,
-                'first_use': now
-            }
+            daily_usage_tracking[user_id] = {"count": 0, "first_use": now}
             return True, 3
-        
+
         # Check if user has used all 3 attempts
-        if user_data['count'] >= 3:
+        if user_data["count"] >= 3:
             return False, 0
-        
-        remaining = 3 - user_data['count']
+
+        remaining = 3 - user_data["count"]
         return True, remaining
 
     def increment_daily_usage(self, user_id: str):
         """Increment the daily usage count for a user"""
         if user_id in daily_usage_tracking:
-            daily_usage_tracking[user_id]['count'] += 1
+            daily_usage_tracking[user_id]["count"] += 1
 
     def get_daily_cooldown_remaining(self, user_id: str) -> timedelta | None:
         """Get remaining cooldown time for daily command"""
         if user_id not in daily_usage_tracking:
             return None
-        
+
         user_data = daily_usage_tracking[user_id]
-        if user_data['count'] < 3:
+        if user_data["count"] < 3:
             return None
-        
+
         now = datetime.now(timezone.utc)
-        cooldown_end = user_data['first_use'] + DAILY_COOLDOWN
-        
+        cooldown_end = user_data["first_use"] + DAILY_COOLDOWN
+
         if now >= cooldown_end:
             return None
-        
+
         return cooldown_end - now
 
     async def getdasigmaballmate(self, player: Player) -> Ball | None:
@@ -386,7 +405,7 @@ class Claim(commands.GroupCog, name="packs"):
         """Format special emoji for display"""
         if not special:
             return ""
-        
+
         if special.emoji:
             try:
                 emoji_id = int(special.emoji)
@@ -396,7 +415,9 @@ class Claim(commands.GroupCog, name="packs"):
                 return special.emoji
         return "⚡"
 
-    @app_commands.command(name="daily", description="Claim your daily Footballer! (3 uses per day)")
+    @app_commands.command(
+        name="daily", description="Claim your daily Footballer! (3 uses per day)"
+    )
     async def daily(self, interaction: discord.Interaction["BallsDexBot"]):
         user_id = str(interaction.user.id)
         username = interaction.user.name
@@ -405,14 +426,13 @@ class Claim(commands.GroupCog, name="packs"):
         min_creation = datetime.now(timezone.utc) - timedelta(days=14)
         if interaction.user.created_at > min_creation:
             await interaction.response.send_message(
-                "Your account must be at least 14 days old to use this command.",
-                ephemeral=True
+                "Your account must be at least 14 days old to use this command.", ephemeral=True
             )
             return
 
         # Check daily usage limits
         can_use, remaining_uses = self.check_daily_usage(user_id)
-        
+
         if not can_use:
             cooldown_remaining = self.get_daily_cooldown_remaining(user_id)
             if cooldown_remaining:
@@ -420,15 +440,15 @@ class Claim(commands.GroupCog, name="packs"):
                 minutes = int((cooldown_remaining.total_seconds() % 3600) // 60)
                 await interaction.response.send_message(
                     f"⏰ You've used all 3 daily packs! Come back in {hours}h {minutes}m for your next set of daily packs.",
-                    ephemeral=True
+                    ephemeral=True,
                 )
                 return
 
         await interaction.response.defer()
-        
+
         # Increment usage count
         self.increment_daily_usage(user_id)
-        
+
         # Get updated remaining uses after incrementing
         _, new_remaining = self.check_daily_usage(user_id)
         player, _ = await Player.get_or_create(discord_id=str(user_id))
@@ -451,7 +471,11 @@ class Claim(commands.GroupCog, name="packs"):
 
         # Walkout starts here
         walkout_embed = Embed(title="🎉 Daily Pack Opening...", color=Color.dark_gray())
-        remaining_text = f"Remaining daily uses: {new_remaining}/3" if new_remaining > 0 else "All daily uses consumed! Come back tomorrow."
+        remaining_text = (
+            f"Remaining daily uses: {new_remaining}/3"
+            if new_remaining > 0
+            else "All daily uses consumed! Come back tomorrow."
+        )
         walkout_embed.set_footer(text=remaining_text)
         msg = await interaction.followup.send(embed=walkout_embed)
 
@@ -476,12 +500,14 @@ class Claim(commands.GroupCog, name="packs"):
                     special_emoji = special.emoji
             else:
                 special_emoji = "⚡"
-            
+
             walkout_embed.description += f"\n{special_emoji} **Special:** **{special.name}**"
             await msg.edit(embed=walkout_embed)
 
         await asyncio.sleep(1.5)
-        walkout_embed.description += f"\n💖 **Health:** `{instance.health}`\n⚽ **Attack:** `{instance.attack}`"
+        walkout_embed.description += (
+            f"\n💖 **Health:** `{instance.health}`\n⚽ **Attack:** `{instance.attack}`"
+        )
         await msg.edit(embed=walkout_embed)
 
         await asyncio.sleep(1.5)
@@ -492,7 +518,9 @@ class Claim(commands.GroupCog, name="packs"):
         # Generate image card
         content, file, view = await instance.prepare_for_message(interaction)
         walkout_embed.set_image(url="attachment://" + file.filename)
-        walkout_embed.set_author(name=interaction.user.display_name, icon_url=interaction.user.display_avatar.url)
+        walkout_embed.set_author(
+            name=interaction.user.display_name, icon_url=interaction.user.display_avatar.url
+        )
 
         await msg.edit(embed=walkout_embed, attachments=[file], view=view)
         file.close()
@@ -517,7 +545,6 @@ class Claim(commands.GroupCog, name="packs"):
             f"Daily use {3-new_remaining}/3 | Footballer ID: `#{ball.pk:0X}`{special_info}"
         )
 
-
     @app_commands.command(name="weekly", description="Claim your weekly Footballer!")
     @app_commands.checks.cooldown(1, 604800, key=lambda i: i.user.id)
     async def weekly(self, interaction: discord.Interaction["BallsDexBot"]):
@@ -527,14 +554,12 @@ class Claim(commands.GroupCog, name="packs"):
         min_creation = datetime.now(timezone.utc) - timedelta(days=14)
         if interaction.user.created_at > min_creation:
             await interaction.response.send_message(
-                "Your account must be at least 14 days old to use this command.",
-                ephemeral=True
+                "Your account must be at least 14 days old to use this command.", ephemeral=True
             )
             return
 
         now = datetime.now()
         last_claim = last_weekly_times.get(user_id)
-
 
         player, _ = await Player.get_or_create(discord_id=str(interaction.user.id))
         ball = await self.getdasigmaballmate(player)
@@ -555,7 +580,9 @@ class Claim(commands.GroupCog, name="packs"):
         )
 
         # Walkout-style embed animation
-        walkout_embed = discord.Embed(title="🎉 Weekly Pack Opening...", color=discord.Color.dark_gray())
+        walkout_embed = discord.Embed(
+            title="🎉 Weekly Pack Opening...", color=discord.Color.dark_gray()
+        )
         walkout_embed.set_footer(text="Come back in 7 days for your next claim!")
         await interaction.response.defer()
         msg = await interaction.followup.send(embed=walkout_embed)
@@ -581,12 +608,14 @@ class Claim(commands.GroupCog, name="packs"):
                     special_emoji = special.emoji
             else:
                 special_emoji = "⚡"
-            
+
             walkout_embed.description += f"\n{special_emoji} **Special:** **{special.name}**"
             await msg.edit(embed=walkout_embed)
 
         await asyncio.sleep(1.5)
-        walkout_embed.description += f"\n💖 **Health:** `{instance.health}`\n⚽ **Attack:** `{instance.attack}`"
+        walkout_embed.description += (
+            f"\n💖 **Health:** `{instance.health}`\n⚽ **Attack:** `{instance.attack}`"
+        )
         await msg.edit(embed=walkout_embed)
 
         await asyncio.sleep(1.5)
@@ -596,11 +625,12 @@ class Claim(commands.GroupCog, name="packs"):
 
         content, file, view = await instance.prepare_for_message(interaction)
         walkout_embed.set_image(url="attachment://" + file.filename)
-        walkout_embed.set_author(name=interaction.user.display_name, icon_url=interaction.user.display_avatar.url)
+        walkout_embed.set_author(
+            name=interaction.user.display_name, icon_url=interaction.user.display_avatar.url
+        )
 
         await msg.edit(embed=walkout_embed, attachments=[file], view=view)
         file.close()
-
 
         # ✅ Log the weekly pack grant to a specific channel and the bot's logger
         log_channel_id = 1361522228021297404  # <- Replace with your logging channel ID
@@ -622,10 +652,6 @@ class Claim(commands.GroupCog, name="packs"):
             f"Footballer ID: `#{ball.pk:0X}`{special_info}"
         )
 
-
-
-
-
     # Main /packly command to claim a ball after using a pack
     @app_commands.command(name="packly", description="Claim your footballer from the packly!")
     @app_commands.checks.cooldown(1, 60, key=lambda i: i.user.id)
@@ -635,21 +661,17 @@ class Claim(commands.GroupCog, name="packs"):
         min_creation = datetime.now(timezone.utc) - timedelta(days=14)
         if interaction.user.created_at > min_creation:
             await interaction.response.send_message(
-                "Your account must be at least 14 days old to use this command.",
-                ephemeral=True
+                "Your account must be at least 14 days old to use this command.", ephemeral=True
             )
             return
-        
+
         # Ensure user starts with 1 pack if no balance is set
         if user_id not in wallet_balance:
             wallet_balance[user_id] = 1  # Initialize with 1 pack
 
         # Check if the user has enough packs to claim
         if wallet_balance[user_id] < 1:
-            await interaction.response.send_message(
-                "You don't have enough packs!",
-                ephemeral=True
-            )
+            await interaction.response.send_message("You don't have enough packs!", ephemeral=True)
             return
 
         # Deduct 1 pack from user's wallet for claiming a ball
@@ -660,7 +682,9 @@ class Claim(commands.GroupCog, name="packs"):
         ball = await self.get_random_ball(player)
 
         if not ball:
-            await interaction.response.send_message("No footballers are available.", ephemeral=True)
+            await interaction.response.send_message(
+                "No footballers are available.", ephemeral=True
+            )
             return
 
         # Get random special for this pack
@@ -676,11 +700,12 @@ class Claim(commands.GroupCog, name="packs"):
         )
 
         # Walkout-style embed animation
-        walkout_embed = discord.Embed(title="🎁 Opening Packly...", color=discord.Color.dark_gray())
+        walkout_embed = discord.Embed(
+            title="🎁 Opening Packly...", color=discord.Color.dark_gray()
+        )
         walkout_embed.set_footer(text="FootballDex Packly")
         await interaction.response.defer()
         msg = await interaction.followup.send(embed=walkout_embed)
-
 
         await asyncio.sleep(1.5)
         walkout_embed.description = f"✨ **Rarity:** `{ball.rarity}`"
@@ -703,12 +728,14 @@ class Claim(commands.GroupCog, name="packs"):
                     special_emoji = special.emoji
             else:
                 special_emoji = "⚡"
-            
+
             walkout_embed.description += f"\n{special_emoji} **Special:** **{special.name}**"
             await msg.edit(embed=walkout_embed)
 
         await asyncio.sleep(1.5)
-        walkout_embed.description += f"\n💖 **Health:** `{instance.health}`\n⚽ **Attack:** `{instance.attack}`"
+        walkout_embed.description += (
+            f"\n💖 **Health:** `{instance.health}`\n⚽ **Attack:** `{instance.attack}`"
+        )
         await msg.edit(embed=walkout_embed)
 
         await asyncio.sleep(1.5)
@@ -718,22 +745,25 @@ class Claim(commands.GroupCog, name="packs"):
 
         content, file, view = await instance.prepare_for_message(interaction)
         walkout_embed.set_image(url="attachment://" + file.filename)
-        walkout_embed.set_author(name=interaction.user.display_name, icon_url=interaction.user.display_avatar.url)
+        walkout_embed.set_author(
+            name=interaction.user.display_name, icon_url=interaction.user.display_avatar.url
+        )
 
         await msg.edit(embed=walkout_embed, attachments=[file], view=view)
         file.close()
 
-    @app_commands.command(name="multipackly", description="Claim multiple footballers from the multipackly!")
-    @app_commands.describe(packs="Number of packs to open (1-75)")
-    @app_commands.checks.cooldown(1, 300, key=lambda i: i.user.id)
+    @app_commands.command(
+        name="multipackly", description="Claim multiple footballers from the multipackly!"
+    )
+    @app_commands.describe(packs="Number of packs to open (1-125)")
+    @app_commands.checks.cooldown(1, 120, key=lambda i: i.user.id)
     async def multipackly(self, interaction: discord.Interaction["BallsDexBot"], packs: int):
         user_id = str(interaction.user.id)
 
         min_creation = datetime.now(timezone.utc) - timedelta(days=14)
         if interaction.user.created_at > min_creation:
             await interaction.response.send_message(
-                "Your account must be at least 14 days old to use this command.",
-                ephemeral=True
+                "Your account must be at least 14 days old to use this command.", ephemeral=True
             )
             return
 
@@ -742,18 +772,14 @@ class Claim(commands.GroupCog, name="packs"):
             wallet_balance[user_id] = 1
 
         # Check numbers.
-        if packs < 1 or packs > 75:
+        if packs < 1 or packs > 125:
             await interaction.response.send_message(
-                "You can only open between 1 and 75 packs!",
-                ephemeral=True
+                "You can only open between 1 and 125 packs!", ephemeral=True
             )
             return
 
         if wallet_balance[user_id] < packs:
-            await interaction.response.send_message(
-                "You don't have enough packs!",
-                ephemeral=True
-            )
+            await interaction.response.send_message("You don't have enough packs!", ephemeral=True)
             return
 
         # Deduct packs
@@ -763,21 +789,25 @@ class Claim(commands.GroupCog, name="packs"):
         first_embed = discord.Embed(
             title="🎁 Opening Multipackly...",
             description="Get ready to reveal your footballers!",
-            color=discord.Color.gold()
+            color=discord.Color.gold(),
         )
         first_embed.set_thumbnail(url=interaction.user.display_avatar.url)
         first_embed.set_footer(text="FootballDex MultiPacklys")
 
-        await interaction.response.send_message(embed=first_embed)
+        # Attach the SkipView here
+        view = SkipView(interaction.user.id)
+        await interaction.response.send_message(embed=first_embed, view=view)
         message = await interaction.original_response()
 
         pulled_balls = []
 
         special_counts = {}
 
-
-        # Small pause to simulate animation
-        await asyncio.sleep(4)
+        # Small skippable pause to simulate initial animation using Event
+        try:
+            await asyncio.wait_for(view.skip_event.wait(), timeout=4.0)
+        except asyncio.TimeoutError:
+            pass
 
         # Reveal footballers one by one
         for _ in range(packs):
@@ -798,72 +828,76 @@ class Claim(commands.GroupCog, name="packs"):
                 special=special,
             )
 
-            # Create the walkout embed
-            special_info = ""
-            if special:
-                special_emoji = ""
-                if special.emoji:
-                    try:
-                        emoji_id = int(special.emoji)
-                        special_emoji = self.bot.get_emoji(emoji_id) or "⚡"
-                    except ValueError:
-                        special_emoji = special.emoji
-                else:
-                    special_emoji = "⚡"
-                special_info = f"\n{special_emoji} **Special:** {special.name}"
-
             if special:
                 special_counts[special.name] = special_counts.get(special.name, 0) + 1
-
-            walkout_embed = discord.Embed(
-                title=f"🏆 You pulled {ball.country}!",
-                description=f"**Rarity:** {ball.rarity}\n⚽ **Attack:** {ball.attack}\n❤️ **Health:** {ball.health}{special_info}",
-                color=discord.Color.random()
-            )
-            walkout_embed.set_thumbnail(url=interaction.user.display_avatar.url)
-            walkout_embed.set_footer(text="FootballDex Pack Opening")
-
-            # Edit the message to show the walkout
-            await message.edit(embed=walkout_embed)
 
             pulled_balls.append(ball)
             balance = wallet_balance.get(user_id, 0)
 
-            await asyncio.sleep(3)  # Pause between each reveal
+            # Only do the walkout message edit if the user hasn't clicked Skip
+            if not view.skipped:
+                # Create the walkout embed
+                special_info = ""
+                if special:
+                    special_emoji = ""
+                    if special.emoji:
+                        try:
+                            emoji_id = int(special.emoji)
+                            special_emoji = self.bot.get_emoji(emoji_id) or "⚡"
+                        except ValueError:
+                            special_emoji = special.emoji
+                    else:
+                        special_emoji = "⚡"
+                    special_info = f"\n{special_emoji} **Special:** {special.name}"
 
-            special_summary = ""
-            if special_counts:
-                special_summary = "\n\n**Specials Pulled:**\n" + "\n".join(f"**{name}** ({count})" for name, count in special_counts.items())
+                walkout_embed = discord.Embed(
+                    title=f"🏆 You pulled {ball.country}!",
+                    description=f"**Rarity:** {ball.rarity}\n⚽ **Attack:** {ball.attack}\n❤️ **Health:** {ball.health}{special_info}",
+                    color=discord.Color.random(),
+                )
+                walkout_embed.set_thumbnail(url=interaction.user.display_avatar.url)
+                walkout_embed.set_footer(text="FootballDex Pack Opening")
 
+                # Edit the message to show the walkout
+                await message.edit(embed=walkout_embed, view=view)
 
-            top_5 = sorted(pulled_balls, key=lambda b: b.rarity, reverse=False)[:5]
-            top_5_summary = "\n**Top 5 Pulls:**\n" + ", ".join(f"**{b.country}**" for b in top_5)
+                # Wait 3 seconds, or instantly break if the Skip button is clicked during this time
+                try:
+                    await asyncio.wait_for(view.skip_event.wait(), timeout=3.0)
+                except asyncio.TimeoutError:
+                    pass
 
+        special_summary = ""
+        if special_counts:
+            special_summary = "\n\n**Specials Pulled:**\n" + "\n".join(
+                f"**{name}** ({count})" for name, count in special_counts.items()
+            )
+
+        top_5 = sorted(pulled_balls, key=lambda b: b.rarity, reverse=False)[:5]
+        top_5_summary = "\n**Top 5 Pulls:**\n" + ", ".join(f"**{b.country}**" for b in top_5)
 
         # Final message after all reveals
         final_embed = discord.Embed(
-        title="🎉 All Footballers Revealed!",
-        description=(
-        f"Your Multi-Packly has been done!\n\n"
-        f"*Here is what you got in your multipackly:*\n"
-        f"**{', '.join(b.country for b in pulled_balls)}!**\n"
-        f"{top_5_summary}\n"
-        f"{special_summary}\n"
-        f"**New Packly Balance: {balance}**"
-        ),
-        color=discord.Color.green()
-)
+            title="🎉 All Footballers Revealed!",
+            description=(
+                f"Your Multi-Packly has been done!\n\n"
+                f"*Here is what you got in your multipackly:*\n"
+                f"**{', '.join(b.country for b in pulled_balls)}!**\n"
+                f"{top_5_summary}\n"
+                f"{special_summary}\n"
+                f"**New Packly Balance: {balance}**"
+            ),
+            color=discord.Color.green(),
+        )
         final_embed.set_footer(text="FootballDex MultiPacklys")
-        await message.edit(embed=final_embed)
-
+        # Ensure we remove the view at the end
+        await message.edit(embed=final_embed, view=None)
 
     # Command to add packs to a user's wallet
     @owners.command(name="add")
     async def ownerspacklyadd(
-        self,
-        interaction: discord.Interaction["BallsDexBot"],
-        user: discord.User,
-        packs: int):
+        self, interaction: discord.Interaction["BallsDexBot"], user: discord.User, packs: int
+    ):
         """Add packs from a user's wallet (owners only).
 
         Parameters
@@ -879,8 +913,7 @@ class Claim(commands.GroupCog, name="packs"):
         # Check if the user issuing the command is allowed to add packs
         if interaction.user.id not in ownersid:
             await interaction.response.send_message(
-                "You are not allowed to add packly's to other people or youself ❌",
-                ephemeral=True
+                "You are not allowed to add packly's to other people or youself ❌", ephemeral=True
             )
             return
 
@@ -898,7 +931,7 @@ class Claim(commands.GroupCog, name="packs"):
                 f"**{interaction.user.display_name}** has added you **{packs}** pack(s)! 🎁\n\n"
                 f"🪙 **Your New Balance:** `{wallet_balance[target_user_id]} packs`"
             ),
-            color=discord.Color.green()
+            color=discord.Color.green(),
         )
         embed.set_footer(text="FootballDex Wallet System")
         embed.set_thumbnail(url=user.display_avatar.url)  # show recipient's avatar
@@ -906,15 +939,16 @@ class Claim(commands.GroupCog, name="packs"):
         allowed = discord.AllowedMentions(users=True, roles=False, everyone=False)
         mention_content = f"{user.mention}"
 
-        await self.safe_send_pinged_embed(interaction, user, embed, content_mention=f"{user.mention}")
-        
+        await self.safe_send_pinged_embed(
+            interaction, user, embed, content_mention=f"{user.mention}"
+        )
+
         # Command to remove packs from a user's wallet
+
     @owners.command(name="remove")
     async def owners_remove(
-        self, 
-        interaction: discord.Interaction["BallsDexBot"],
-        user: discord.User,
-        packs: int):
+        self, interaction: discord.Interaction["BallsDexBot"], user: discord.User, packs: int
+    ):
         """Remove packs from a user's wallet (owners only).
 
         Parameters
@@ -931,7 +965,7 @@ class Claim(commands.GroupCog, name="packs"):
         if interaction.user.id not in ownersid:
             await interaction.response.send_message(
                 "You are not allowed to remove packly's from other people or youself ❌",
-                ephemeral=True
+                ephemeral=True,
             )
             return
 
@@ -949,14 +983,17 @@ class Claim(commands.GroupCog, name="packs"):
                 f"{interaction.user.mention} has removed **{packs}** pack(s) from {user.mention}'s wallet.\n"
                 f"🪙 **{user.name}'s New Balance**: `{wallet_balance[target_user_id]} packs`"
             ),
-            color=discord.Color.red()
+            color=discord.Color.red(),
         )
         embed.set_footer(text="Packly System")
         embed.set_thumbnail(url=user.display_avatar.url)
 
         await interaction.response.send_message(embed=embed)
 
-    @app_commands.command(name="gamblepack", description="Gamble your packlys for a chance to win double – or lose it all!")
+    @app_commands.command(
+        name="gamblepack",
+        description="Gamble your packlys for a chance to win double – or lose it all!",
+    )
     @app_commands.describe(amount="How many packs to gamble (fixed 50/50 chance)")
     async def gamblepack(self, interaction: discord.Interaction["BallsDexBot"], amount: int = 1):
         user_id = str(interaction.user.id)
@@ -964,28 +1001,32 @@ class Claim(commands.GroupCog, name="packs"):
         min_creation = datetime.now(timezone.utc) - timedelta(days=14)
         if interaction.user.created_at > min_creation:
             await interaction.response.send_message(
-                "Your account must be at least 14 days old to use this command.",
-                ephemeral=True
+                "Your account must be at least 14 days old to use this command.", ephemeral=True
             )
             return
 
         now = datetime.utcnow()
 
         if amount < 1:
-            await interaction.response.send_message("You must gamble at least 1 pack.", ephemeral=True)
+            await interaction.response.send_message(
+                "You must gamble at least 1 pack.", ephemeral=True
+            )
             return
 
-        if amount > 100:
-            await interaction.response.send_message("❌ You can only gamble up to 100 packlys at once.", ephemeral=True)
+        if amount > 10000:
+            await interaction.response.send_message(
+                "❌ You can only gamble up to 10000 packlys at once.", ephemeral=True
+            )
             return
-
 
         # Ensure user has balance
         if user_id not in wallet_balance:
             wallet_balance[user_id] = 0
 
         if wallet_balance[user_id] < amount:
-            await interaction.response.send_message("❌ You don't have enough packlys to gamble that many.", ephemeral=True)
+            await interaction.response.send_message(
+                "❌ You don't have enough packlys to gamble that many.", ephemeral=True
+            )
             return
 
         # Deduct packs immediately
@@ -996,7 +1037,7 @@ class Claim(commands.GroupCog, name="packs"):
         suspense = discord.Embed(
             title=f"🎲 Gambling {amount} packly{'s' if amount > 1 else ''}...",
             description="Rolling the dice...",
-            color=discord.Color.dark_grey()
+            color=discord.Color.dark_grey(),
         )
         suspense.set_footer(text="Good luck...")
         msg = await interaction.followup.send(embed=suspense)
@@ -1032,10 +1073,8 @@ class Claim(commands.GroupCog, name="packs"):
     @app_commands.command(name="give")
     @app_commands.checks.cooldown(1, 10, key=lambda i: i.user.id)
     async def give(
-        self,
-        interaction: discord.Interaction["BallsDexBot"],
-        member: discord.Member,
-        packs: int):
+        self, interaction: discord.Interaction["BallsDexBot"], member: discord.Member, packs: int
+    ):
         """
         Give pack(s) to a user or a friend!
 
@@ -1054,16 +1093,14 @@ class Claim(commands.GroupCog, name="packs"):
         # Cannot give to yourself
         if interaction.user.id == member.id:
             await interaction.response.send_message(
-                "You cannot give packlys to yourself.",
-                ephemeral=True
+                "You cannot give packlys to yourself.", ephemeral=True
             )
             return
 
         # Amount must be positive
         if packs <= 0:
             await interaction.response.send_message(
-                "Amount must be greater than 0.",
-                ephemeral=True
+                "Amount must be greater than 0.", ephemeral=True
             )
             return
 
@@ -1073,7 +1110,7 @@ class Claim(commands.GroupCog, name="packs"):
         if sender_balance < packs:
             await interaction.response.send_message(
                 f"You don't have enough packlys. You currently have **{sender_balance}**.",
-                ephemeral=True
+                ephemeral=True,
             )
             return
 
@@ -1092,7 +1129,7 @@ class Claim(commands.GroupCog, name="packs"):
                     f"Sender New Balance: **{wallet_balance[sender_id]}**\n"
                     f"Receiver New Balance: **{wallet_balance[receiver_id]}**"
                 ),
-                color=discord.Color.orange()
+                color=discord.Color.orange(),
             )
 
             log_embed.set_footer(text="FootballDex Packlys Logs")
@@ -1106,43 +1143,29 @@ class Claim(commands.GroupCog, name="packs"):
                 f"**{interaction.user.name}** now has **{wallet_balance[sender_id]}** packly(s).\n"
                 f"**{member.name}** now has **{wallet_balance[receiver_id]}** packly(s)."
             ),
-            color=discord.Color.green()
+            color=discord.Color.green(),
         )
 
         embed.set_footer(text="FootballDex Packlys")
 
         await interaction.response.send_message(
-            content=f"{interaction.user.mention} {member.mention}",
-            embed=embed
+            content=f"{interaction.user.mention} {member.mention}", embed=embed
         )
 
-
     @app_commands.command(name="leaderboard")
-    async def leaderboard(
-        self,
-        interaction: discord.Interaction["BallsDexBot"]):
+    async def leaderboard(self, interaction: discord.Interaction["BallsDexBot"]):
         """
         See the top 10 richest users with the most amount of packs!
         """
 
         if not wallet_balance:
-            await interaction.response.send_message(
-                "No one has any packlys yet.",
-                ephemeral=True
-            )
+            await interaction.response.send_message("No one has any packlys yet.", ephemeral=True)
             return
 
         # Sort users by balance (highest first)
-        sorted_users = sorted(
-            wallet_balance.items(),
-            key=lambda x: x[1],
-            reverse=True
-        )[:10]
+        sorted_users = sorted(wallet_balance.items(), key=lambda x: x[1], reverse=True)[:10]
 
-        embed = discord.Embed(
-            title="🤑 Packlys Leaderboard",
-            color=discord.Color.gold()
-        )
+        embed = discord.Embed(title="🤑 Packlys Leaderboard", color=discord.Color.gold())
 
         description = ""
 
@@ -1159,7 +1182,6 @@ class Claim(commands.GroupCog, name="packs"):
 
         await interaction.response.send_message(embed=embed)
 
-    
     # Command to check wallet balance ->
     @app_commands.command(name="wallet", description="Check your wallet balance")
     @app_commands.checks.cooldown(1, 10, key=lambda i: i.user.id)
@@ -1179,21 +1201,22 @@ class Claim(commands.GroupCog, name="packs"):
                     "- These packlys can be used for `/packs packlys` `/packs multipackly` and `/packs gamblepack`\n"
                     "Enjoy!"
                 ),
-                color=discord.Color.gold()
+                color=discord.Color.gold(),
             )
             await interaction.response.send_message(embed=tutorial_embed, ephemeral=True)
             self.bot_walletturorial_seen.add(user_id)
             return  # End here so user is able to view the tutorial first.
-        
+
         # Get the users pack balance:
         balance = wallet_balance.get(user_id, 0)
-        
+
         embed = discord.Embed(
             title=f"{username}'s Wallet",
             description=f"You currently have **{balance}** packly(s).",
-            color=discord.Color.green()
+            color=discord.Color.green(),
         )
         embed.set_footer(text="FootballDex Wallet")
-        
+
         # Send wallet via embed
         await interaction.response.send_message(embed=embed, ephemeral=False)
+        
