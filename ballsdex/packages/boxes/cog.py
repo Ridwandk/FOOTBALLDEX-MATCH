@@ -674,7 +674,7 @@ class Claim(commands.GroupCog, name="packs"):
         packs="Number of packs to open (1-75)",
         fast_open="Set to True to skip all animations and instantly open all packs"
     )
-    @app_commands.checks.cooldown(1, 240, key=lambda i: i.user.id)
+    @app_commands.checks.cooldown(1, 120, key=lambda i: i.user.id)
     async def multipackly(self, interaction: discord.Interaction["BallsDexBot"], packs: int, fast_open: bool = False):
         user_id = str(interaction.user.id)
 
