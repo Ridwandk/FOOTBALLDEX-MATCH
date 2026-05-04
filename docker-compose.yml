@@ -32,7 +32,7 @@ services:
     image: ballsdex
     build: .
     ports:
-      - "8001:8000"
+      - "8000:8000"
     networks:
       - internal
     environment:
