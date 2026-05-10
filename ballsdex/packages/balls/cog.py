@@ -453,7 +453,7 @@ class Balls(commands.GroupCog, group_name=settings.players_group_cog_name):
         await pages.start()
 
     @app_commands.command()
-    @app_commands.checks.cooldown(1, 60, key=lambda i: i.user.id)
+    @app_commands.checks.cooldown(1, 600, key=lambda i: i.user.id)
     async def unobtainable_completion(
         self,
         interaction: discord.Interaction["BallsDexBot"],
@@ -637,7 +637,8 @@ class Balls(commands.GroupCog, group_name=settings.players_group_cog_name):
             await interaction.followup.send(embed=embed)
         else:
             # Use paginator for many fields
-            paginator = FieldPageSource(fields, per_page=4)
+            # FIXED: Added inline=False and clear_description=False
+            paginator = FieldPageSource(fields, per_page=4, inline=False, clear_description=False)
             paginator.embed.title = embed.title
             paginator.embed.description = embed.description
             paginator.embed.color = embed.color

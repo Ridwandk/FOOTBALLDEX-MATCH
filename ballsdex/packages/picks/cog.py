@@ -471,7 +471,8 @@ class Picks(commands.GroupCog, name="picks"):
                     ephemeral=True,
                 )
                 return
-
+        # 2. DEDUCT THE DAILY IMMEDIATELY
+        self.increment_daily_usage(user_id_str)
         await interaction.response.defer()
 
         player, _ = await Player.get_or_create(discord_id=str(user_id))
@@ -512,8 +513,7 @@ class Picks(commands.GroupCog, name="picks"):
             await msg.edit(embed=timeout_embed, view=None)
             return
 
-        # Increment usage count
-        self.increment_daily_usage(user_id)
+        
 
         ball = view.selected_ball
 
@@ -811,6 +811,9 @@ class Picks(commands.GroupCog, name="picks"):
             )
             return
 
+        # 1. DEDUCT THE PICK IMMEDIATELY
+        pick_wallet[user_id_str] -= 1
+
         await interaction.response.defer()
 
         player, _ = await Player.get_or_create(discord_id=str(interaction.user.id))
@@ -833,7 +836,7 @@ class Picks(commands.GroupCog, name="picks"):
 
         pick_embed.description = description
         pick_embed.set_footer(
-            text=f"Picks remaining: {pick_wallet[user_id_str]-1} after this pick"
+            text=f"Picks remaining: {pick_wallet[user_id_str]} after this pick"
         )
 
         # Start the pick session
@@ -853,8 +856,7 @@ class Picks(commands.GroupCog, name="picks"):
             await msg.edit(embed=timeout_embed, view=None)
             return
 
-        # Deduct pick from wallet
-        pick_wallet[user_id_str] -= 1
+        
 
         ball = view.selected_ball
 

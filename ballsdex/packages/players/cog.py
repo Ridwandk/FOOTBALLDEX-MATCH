@@ -616,6 +616,7 @@ class Player(commands.GroupCog):
         await interaction.followup.send(embed=embed, ephemeral=True)
 
     @app_commands.command()
+    @app_commands.checks.cooldown(1, 604800, key=lambda i: i.user.id)
     @app_commands.choices(
         type=[
             app_commands.Choice(name=settings.collectible_name.title(), value="balls"),

@@ -207,7 +207,7 @@ class Claim(commands.GroupCog, name="packs"):
                 rarity_weight = 600
             elif 1.5 <= ball.rarity < 2.5:
                 rarity_weight = 300 
-            elif 0.5 < ball.rarity < 1.5:
+            elif 0.5 <= ball.rarity < 1.5:
                 rarity_weight = 100 
             elif 0.1 < ball.rarity < 0.5:
                 rarity_weight = 30 

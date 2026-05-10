@@ -229,7 +229,11 @@ class BallInstance(models.Model):
     trade_player: fields.ForeignKeyRelation[Player] | None = fields.ForeignKeyField(
         "models.Player", null=True, default=None, on_delete=fields.SET_NULL
     )
-    favorite = fields.BooleanField(default=False)
+    
+    # -------- THE FIX IS HERE --------
+    favorite = fields.BooleanField(default=False, index=True)
+    # ---------------------------------
+    
     tradeable = fields.BooleanField(default=True)
     locked: fields.Field[datetime] = fields.DatetimeField(
         description="If the instance was locked for a trade and when",
