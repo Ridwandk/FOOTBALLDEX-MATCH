@@ -424,6 +424,7 @@ class Picks(commands.GroupCog, name="picks"):
         return cooldown_end - now
 
     @app_commands.command(name="daily", description="Pick your daily Footballer!")
+    @app_commands.checks.cooldown(1, 86400, key=lambda i: i.user.id)
     async def daily(self, interaction: discord.Interaction[BallsDexBot]):
         user_id = interaction.user.id
 

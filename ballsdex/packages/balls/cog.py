@@ -297,7 +297,6 @@ class Balls(commands.GroupCog, group_name=settings.players_group_cog_name):
         await paginator.start(content=content)
 
     @app_commands.command()
-    @app_commands.checks.cooldown(1, 60, key=lambda i: i.user.id)
     async def completion(
         self,
         interaction: discord.Interaction["BallsDexBot"],
@@ -812,7 +811,9 @@ class Balls(commands.GroupCog, group_name=settings.players_group_cog_name):
 
         if not countryball.favorite:
             try:
-                player = await Player.get(discord_id=interaction.user.id).prefetch_related("balls")
+                # OPTIMIZATION: Removed .prefetch_related("balls") 
+                # Fetching the player alone is very fast. Prefetching all balls was causing the massive lag.
+                player = await Player.get(discord_id=interaction.user.id)
             except DoesNotExist:
                 await interaction.followup.send(
                     f"You don't have any {settings.plural_collectible_name} yet."
@@ -825,6 +826,7 @@ class Balls(commands.GroupCog, group_name=settings.players_group_cog_name):
                 else f"{settings.plural_collectible_name}"
             )
 
+            # This will now do a direct SQL COUNT() query instead of checking a massive prefetched list
             if await player.balls.filter(favorite=True).count() >= settings.max_favorites:
                 await interaction.followup.send(
                     f"You cannot set more than {settings.max_favorites} favorite {grammar}."
@@ -847,7 +849,6 @@ class Balls(commands.GroupCog, group_name=settings.players_group_cog_name):
             await interaction.followup.send(
                 f"{emoji} `#{countryball.pk:0X}` {countryball.countryball.country} isn't a favorite {settings.collectible_name} anymore."
             )
-
     @app_commands.command(extras={"trade": TradeCommandType.PICK})
     async def give(
         self,
