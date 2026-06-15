@@ -69,17 +69,17 @@ ROLE_CONFIG = {
     "premiumPatreon": {
         "dailyLimit": 1000000,
         "cooldownSeconds": 6,
-        "roleIds": [1516180462383661230]
+        "roleIds": [1514426022429458663]
     },
     "paidAmbassador": {
         "dailyLimit": 450000,
         "cooldownSeconds": 14,
-        "roleIds": [1516180493811449857]
+        "roleIds": [1514424682084831364]
     },
     "ambassador": {
         "dailyLimit": 250000,
         "cooldownSeconds": 26,
-        "roleIds": [1516180506209812540]
+        "roleIds": [1379106307319136266]
     },
     "booster": {
         "dailyLimit": 150000,
