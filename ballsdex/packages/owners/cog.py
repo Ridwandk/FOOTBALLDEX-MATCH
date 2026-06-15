@@ -38,7 +38,9 @@ from collections import defaultdict
 # Owners who can give packs
 ownersid =[
     749658746535280771,
-    767663084890226689
+    767663084890226689,
+    257972292645027841,
+    784414771993903125
 ]
 
 

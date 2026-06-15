@@ -57,8 +57,41 @@ packly_pool = defaultdict(int)
 active_multipackly: set[str] = set()
 multipackly_locks: dict[str, asyncio.Lock] = {}
 
-# Custom daily usage tracking - stores {user_id: {'count': int, 'first_use': datetime}}
+# Custom daily usage tracking for the /daily command (3 uses per day)
 daily_usage_tracking = {}
+
+# Dynamic Pack System Tracking
+pack_cooldown_tracking = {}      # Stores {user_id: datetime}
+pack_daily_limit_tracking = {}   # Stores {user_id: {"count": int, "reset_time": datetime}}
+
+# Role Configuration Map
+ROLE_CONFIG = {
+    "premiumPatreon": {
+        "dailyLimit": 1000000,
+        "cooldownSeconds": 6,
+        "roleIds": [1516180462383661230]
+    },
+    "paidAmbassador": {
+        "dailyLimit": 450000,
+        "cooldownSeconds": 14,
+        "roleIds": [1516180493811449857]
+    },
+    "ambassador": {
+        "dailyLimit": 250000,
+        "cooldownSeconds": 26,
+        "roleIds": [1516180506209812540]
+    },
+    "booster": {
+        "dailyLimit": 150000,
+        "cooldownSeconds": 43,
+        "roleIds": [1478300538020958249, 1263953046573158462]
+    },
+    "default": {
+        "dailyLimit": 50000,
+        "cooldownSeconds": 120,
+        "roleIds": []
+    }
+}
 
 # Owners who can give packs
 ownersid = {
@@ -69,9 +102,8 @@ ownersid = {
     1231339940382638080,
     1184739489315299339,
     257972292645027841,
-    1119377053054148719,
+    1250399605733195906,
     596428982694707240,
-    844513025820983318,
 }
 
 # Cooldowns
@@ -91,7 +123,6 @@ class SkipView(View):
 
     @discord.ui.button(label="Skip Animation", style=discord.ButtonStyle.secondary, emoji="⏭️")
     async def skip_button(self, interaction: discord.Interaction, button: discord.ui.Button):
-        # Guaranteed check inside the callback so it doesn't crash or bypass the view
         if interaction.user.id != self.user_id:
             await interaction.response.send_message(
                 "❌ Only the person opening the packs can skip!", ephemeral=True
@@ -104,7 +135,6 @@ class SkipView(View):
         button.disabled = True
         button.style = discord.ButtonStyle.success
 
-        # Update embed to show skip confirmation
         current_embed = interaction.message.embeds[0]
         current_embed.description = "⏩ **Animation skipped! Showing final results...**"
         current_embed.color = Color.green()
@@ -127,14 +157,20 @@ class Claim(commands.GroupCog, name="packs"):
 
     owners = app_commands.Group(name="owners", description="Owner-only commands")
 
-    async def get_random_special(self) -> Special | None:
-        """
-        Get a random special based on rarity probability and date restrictions.
-        Returns None if no special is selected or available.
-        """
-        now = datetime.now(timezone.utc)
+    def get_user_pack_tier(self, user: discord.User | discord.Member) -> dict:
+        """Determines the user's tier based on their highest qualifying Discord role."""
+        if not isinstance(user, discord.Member):
+            return ROLE_CONFIG["default"]
+        
+        user_role_ids = {role.id for role in user.roles}
+        for tier_name in ["premiumPatreon", "paidAmbassador", "ambassador", "booster"]:
+            tier = ROLE_CONFIG[tier_name]
+            if any(role_id in user_role_ids for role_id in tier["roleIds"]):
+                return tier
+        return ROLE_CONFIG["default"]
 
-        # Get all active specials that respect date restrictions
+    async def get_random_special(self) -> Special | None:
+        now = datetime.now(timezone.utc)
         try:
             active_specials = await Special.filter(
                 Q(start_date__isnull=True) | Q(start_date__lte=now),
@@ -147,17 +183,12 @@ class Claim(commands.GroupCog, name="packs"):
         if not active_specials:
             return None
 
-        # Apply rarity probability for each special
         for special in active_specials:
             if random.random() < special.rarity:
                 return special
-
         return None
 
     async def _start_worker_manager(self):
-        """
-        Manages the queue and passes tasks to concurrent workers.
-        """
         while True:
             user_id, packs, interaction = await self.pack_queue.get()
             asyncio.create_task(
@@ -166,15 +197,9 @@ class Claim(commands.GroupCog, name="packs"):
             self.pack_queue.task_done()
 
     async def _process_multipackly(self, user_id, packs, interaction):
-        """
-        Compatibility shim: forwards calls to the real worker method.
-        """
         return await self._process_multipackly_and_clean_up(user_id, packs, interaction)
 
     async def _process_multipackly_and_clean_up(self, user_id, packs, interaction):
-        """
-        This is a wrapper function that runs the main process and ensures cleanup.
-        """
         try:
             await self._process_multipackly(user_id, packs, interaction)
         except Exception as e:
@@ -199,7 +224,7 @@ class Claim(commands.GroupCog, name="packs"):
 
         weighted_choices = []
         for ball in all_balls:
-            base_weight = 1 if ball.id in owned_ids else 1
+            base_weight = 1
 
             if 5.0 <= ball.rarity <= 30.0:
                 rarity_weight = 1600 
@@ -213,6 +238,8 @@ class Claim(commands.GroupCog, name="packs"):
                 rarity_weight = 30 
             elif 0.01 <= ball.rarity <= 0.1:
                 rarity_weight = 20 
+            else:
+                rarity_weight = 1
 
             final_weight = base_weight * rarity_weight
             weighted_choices.append((ball, final_weight))
@@ -223,7 +250,6 @@ class Claim(commands.GroupCog, name="packs"):
 
         if not choices:
             return None
-
         return random.choice(choices)
 
     async def safe_send_pinged_embed(
@@ -302,7 +328,6 @@ class Claim(commands.GroupCog, name="packs"):
 
         if now >= cooldown_end:
             return None
-
         return cooldown_end - now
 
     async def getdasigmaballmate(self, player: Player) -> Ball | None:
@@ -316,7 +341,7 @@ class Claim(commands.GroupCog, name="packs"):
 
         weighted_choices = []
         for ball in all_balls:
-            base_weight = 1 if ball.id in owned_ids else 1
+            base_weight = 1
 
             if ball.rarity >= 4.5: 
                 rarity_weight = 900
@@ -336,7 +361,6 @@ class Claim(commands.GroupCog, name="packs"):
 
         if not choices:
             return None
-
         return random.choice(choices)
 
     def format_special_emoji(self, special: Special | None) -> str:
@@ -357,7 +381,6 @@ class Claim(commands.GroupCog, name="packs"):
     )
     async def daily(self, interaction: discord.Interaction["BallsDexBot"]):
         user_id = str(interaction.user.id)
-        username = interaction.user.name
 
         min_creation = datetime.now(timezone.utc) - timedelta(days=14)
         if interaction.user.created_at > min_creation:
@@ -380,9 +403,7 @@ class Claim(commands.GroupCog, name="packs"):
                 return
 
         await interaction.response.defer()
-
         self.increment_daily_usage(user_id)
-
         _, new_remaining = self.check_daily_usage(user_id)
         player, _ = await Player.get_or_create(discord_id=str(user_id))
         ball = await self.get_random_ball(player)
@@ -392,7 +413,6 @@ class Claim(commands.GroupCog, name="packs"):
             return
 
         special = await self.get_random_special()
-
         instance = await BallInstance.create(
             ball=ball,
             player=player,
@@ -477,7 +497,6 @@ class Claim(commands.GroupCog, name="packs"):
     @app_commands.checks.cooldown(1, 604800, key=lambda i: i.user.id)
     async def weekly(self, interaction: discord.Interaction["BallsDexBot"]):
         user_id = str(interaction.user.id)
-        username = interaction.user.name
 
         min_creation = datetime.now(timezone.utc) - timedelta(days=14)
         if interaction.user.created_at > min_creation:
@@ -485,9 +504,6 @@ class Claim(commands.GroupCog, name="packs"):
                 "Your account must be at least 14 days old to use this command.", ephemeral=True
             )
             return
-
-        now = datetime.now()
-        last_claim = last_weekly_times.get(user_id)
 
         player, _ = await Player.get_or_create(discord_id=str(interaction.user.id))
         ball = await self.getdasigmaballmate(player)
@@ -497,7 +513,6 @@ class Claim(commands.GroupCog, name="packs"):
             return
 
         special = await self.get_random_special()
-
         instance = await BallInstance.create(
             ball=ball,
             player=player,
@@ -577,9 +592,9 @@ class Claim(commands.GroupCog, name="packs"):
         )
 
     @app_commands.command(name="packly", description="Claim your footballer from the packly!")
-    @app_commands.checks.cooldown(1, 60, key=lambda i: i.user.id)
     async def packly(self, interaction: discord.Interaction["BallsDexBot"]):
         user_id = str(interaction.user.id)
+        u_id_int = interaction.user.id
 
         min_creation = datetime.now(timezone.utc) - timedelta(days=14)
         if interaction.user.created_at > min_creation:
@@ -595,6 +610,38 @@ class Claim(commands.GroupCog, name="packs"):
             await interaction.response.send_message("You don't have enough packs!", ephemeral=True)
             return
 
+        # --- DYNAMIC COOLDOWN & LIMIT VERIFICATION ---
+        now = datetime.now(timezone.utc)
+        tier = self.get_user_pack_tier(interaction.user)
+
+        last_open = pack_cooldown_tracking.get(u_id_int)
+        if last_open:
+            elapsed = (now - last_open).total_seconds()
+            if elapsed < tier["cooldownSeconds"]:
+                remaining = tier["cooldownSeconds"] - elapsed
+                await interaction.response.send_message(
+                    f"⏰ Cooldown active! Please wait {remaining:.1f}s before opening another pack.", ephemeral=True
+                )
+                return
+
+        daily_data = pack_daily_limit_tracking.get(u_id_int)
+        if daily_data and now < daily_data["reset_time"]:
+            if daily_data["count"] + 1 > tier["dailyLimit"]:
+                time_until_reset = daily_data["reset_time"] - now
+                hours = int(time_until_reset.total_seconds() // 3600)
+                minutes = int((time_until_reset.total_seconds() % 3600) // 60)
+                await interaction.response.send_message(
+                    f"🛑 Daily pack opening limit reached ({tier['dailyLimit']:,} max). Cycle resets in {hours}h {minutes}m.", ephemeral=True
+                )
+                return
+
+        # Commit Tracking Update
+        if u_id_int not in pack_daily_limit_tracking or now >= pack_daily_limit_tracking[u_id_int]["reset_time"]:
+            pack_daily_limit_tracking[u_id_int] = {"count": 0, "reset_time": now + timedelta(days=1)}
+        pack_daily_limit_tracking[u_id_int]["count"] += 1
+        pack_cooldown_tracking[u_id_int] = now
+        # ----------------------------------------------
+
         wallet_balance[user_id] -= 1
 
         player, _ = await Player.get_or_create(discord_id=str(interaction.user.id))
@@ -607,7 +654,6 @@ class Claim(commands.GroupCog, name="packs"):
             return
 
         special = await self.get_random_special()
-
         instance = await BallInstance.create(
             ball=ball,
             player=player,
@@ -619,7 +665,8 @@ class Claim(commands.GroupCog, name="packs"):
         walkout_embed = discord.Embed(
             title="🎁 Opening Packly...", color=discord.Color.dark_gray()
         )
-        walkout_embed.set_footer(text="FootballDex Packly")
+        current_opened = pack_daily_limit_tracking[u_id_int]["count"]
+        walkout_embed.set_footer(text=f"FootballDex Packly | Daily Packs: {current_opened:,}/{tier['dailyLimit']:,}")
         await interaction.response.defer()
         msg = await interaction.followup.send(embed=walkout_embed)
 
@@ -674,9 +721,9 @@ class Claim(commands.GroupCog, name="packs"):
         packs="Number of packs to open (1-75)",
         fast_open="Set to True to skip all animations and instantly open all packs"
     )
-    @app_commands.checks.cooldown(1, 120, key=lambda i: i.user.id)
     async def multipackly(self, interaction: discord.Interaction["BallsDexBot"], packs: int, fast_open: bool = False):
         user_id = str(interaction.user.id)
+        u_id_int = interaction.user.id
 
         min_creation = datetime.now(timezone.utc) - timedelta(days=14)
         if interaction.user.created_at > min_creation:
@@ -698,9 +745,42 @@ class Claim(commands.GroupCog, name="packs"):
             await interaction.response.send_message("You don't have enough packs!", ephemeral=True)
             return
 
+        # --- DYNAMIC COOLDOWN & LIMIT VERIFICATION ---
+        now = datetime.now(timezone.utc)
+        tier = self.get_user_pack_tier(interaction.user)
+
+        last_open = pack_cooldown_tracking.get(u_id_int)
+        if last_open:
+            elapsed = (now - last_open).total_seconds()
+            if elapsed < tier["cooldownSeconds"]:
+                remaining = tier["cooldownSeconds"] - elapsed
+                await interaction.response.send_message(
+                    f"⏰ Cooldown active! Please wait {remaining:.1f}s before opening more packs.", ephemeral=True
+                )
+                return
+
+        daily_data = pack_daily_limit_tracking.get(u_id_int)
+        if daily_data and now < daily_data["reset_time"]:
+            if daily_data["count"] + packs > tier["dailyLimit"]:
+                allowed_packs = tier["dailyLimit"] - daily_data["count"]
+                time_until_reset = daily_data["reset_time"] - now
+                hours = int(time_until_reset.total_seconds() // 3600)
+                minutes = int((time_until_reset.total_seconds() % 3600) // 60)
+                await interaction.response.send_message(
+                    f"🛑 Opening {packs} packs would exceed your remaining daily limit ({allowed_packs:,} left). "
+                    f"Resets in {hours}h {minutes}m.", ephemeral=True
+                )
+                return
+
+        # Commit Tracking Update
+        if u_id_int not in pack_daily_limit_tracking or now >= pack_daily_limit_tracking[u_id_int]["reset_time"]:
+            pack_daily_limit_tracking[u_id_int] = {"count": 0, "reset_time": now + timedelta(days=1)}
+        pack_daily_limit_tracking[u_id_int]["count"] += packs
+        pack_cooldown_tracking[u_id_int] = now
+        # ----------------------------------------------
+
         # Deduct packs
         wallet_balance[user_id] -= packs
-
         view = None
 
         if fast_open:
@@ -723,12 +803,9 @@ class Claim(commands.GroupCog, name="packs"):
             except asyncio.TimeoutError:
                 pass
 
-        # ---------------------------------------------------------
-        # OPTIMIZED DATABASE FETCHES
-        # ---------------------------------------------------------
         player, _ = await Player.get_or_create(discord_id=user_id)
-        
         all_balls = await Ball.filter(rarity__gte=0.03, rarity__lte=30.0, enabled=True).all()
+        
         if not all_balls:
             if fast_open:
                 await interaction.followup.send("No footballers are available.", ephemeral=True)
@@ -747,7 +824,6 @@ class Claim(commands.GroupCog, name="packs"):
             else: rarity_weight = 1
             weighted_choices.extend([b] * rarity_weight)
 
-        now = datetime.now(timezone.utc)
         active_specials = await Special.filter(
             Q(start_date__isnull=True) | Q(start_date__lte=now),
             Q(end_date__isnull=True) | Q(end_date__gte=now),
@@ -758,12 +834,8 @@ class Claim(commands.GroupCog, name="packs"):
         special_counts = {}
         instances_to_create = []
 
-        # ---------------------------------------------------------
-        # GENERATE ALL PACKS IN MEMORY 
-        # ---------------------------------------------------------
         for _ in range(packs):
             ball = random.choice(weighted_choices)
-            
             special = None
             if active_specials:
                 for sp in active_specials:
@@ -785,13 +857,9 @@ class Claim(commands.GroupCog, name="packs"):
             )
             pulled_balls.append(ball)
 
-        # ONE BULK DATABASE SAVE
         await BallInstance.bulk_create(instances_to_create)
         balance = wallet_balance.get(user_id, 0)
 
-        # ---------------------------------------------------------
-        # ANIMATION LOGIC (Bypassed entirely if fast_open=True)
-        # ---------------------------------------------------------
         if not fast_open and view is not None and not view.skipped:
             cards_to_animate = min(packs, 3) 
             for i in range(cards_to_animate):
@@ -827,9 +895,6 @@ class Claim(commands.GroupCog, name="packs"):
                 except asyncio.TimeoutError:
                     pass
 
-        # ---------------------------------------------------------
-        # FINAL SUMMARY SCREEN
-        # ---------------------------------------------------------
         special_summary = ""
         if special_counts:
             special_summary = "\n\n**Specials Pulled:**\n" + "\n".join(
@@ -839,6 +904,7 @@ class Claim(commands.GroupCog, name="packs"):
         top_5 = sorted(pulled_balls, key=lambda b: b.rarity, reverse=False)[:5]
         top_5_summary = "\n**Top 5 Pulls:**\n" + ", ".join(f"**{b.country}**" for b in top_5)
 
+        current_opened = pack_daily_limit_tracking[u_id_int]["count"]
         final_embed = discord.Embed(
             title="🎉 All Footballers Revealed!",
             description=(
@@ -851,7 +917,7 @@ class Claim(commands.GroupCog, name="packs"):
             ),
             color=discord.Color.green(),
         )
-        final_embed.set_footer(text="FootballDex MultiPacklys")
+        final_embed.set_footer(text=f"FootballDex MultiPacklys | Daily Packs: {current_opened:,}/{tier['dailyLimit']:,}")
         
         if fast_open:
             await interaction.followup.send(embed=final_embed)
