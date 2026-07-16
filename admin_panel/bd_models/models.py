@@ -177,11 +177,36 @@ class Special(models.Model):
         db_table = "special"
 
 
+class Position(models.TextChoices):
+    NA = "N/A", "Not Assigned"
+    GK = "GK", "Goalkeeper"
+    CB = "CB", "Centre-Back"
+    LB = "LB", "Left-Back"
+    RB = "RB", "Right-Back"
+    LWB = "LWB", "Left Wing-Back"
+    RWB = "RWB", "Right Wing-Back"
+    CDM = "CDM", "Defensive Midfielder"
+    CM = "CM", "Central Midfielder"
+    CAM = "CAM", "Attacking Midfielder"
+    LM = "LM", "Left Midfielder"
+    RM = "RM", "Right Midfielder"
+    LW = "LW", "Left Winger"
+    RW = "RW", "Right Winger"
+    ST = "ST", "Striker"
+    CF = "CF", "Centre-Forward"
+
+
 class Ball(models.Model):
     country = models.CharField(unique=True, max_length=48, verbose_name="Name")
     health = models.IntegerField(help_text="Ball health stat")
     attack = models.IntegerField(help_text="Ball attack stat")
     rarity = models.FloatField(help_text="Rarity of this ball")
+    position = models.CharField(
+        max_length=4,
+        choices=Position.choices,
+        default=Position.NA,
+        help_text="Footballer's position, used for the Starting XI match system",
+    )
     emoji_id = models.BigIntegerField(help_text="Emoji ID for this ball")
     wild_card = models.ImageField(
         max_length=200,
@@ -422,3 +447,99 @@ class Block(models.Model):
     class Meta:
         managed = True
         db_table = "block"
+
+
+class XiTeam(models.Model):
+    """A saved Starting XI team, built via the /xi command group."""
+
+    player = models.ForeignKey(Player, on_delete=models.CASCADE, related_name="xi_teams")
+    player_id: int
+    name = models.CharField(max_length=32, help_text="Name given to this saved team")
+    formation = models.CharField(max_length=16, default="4-3-3")
+    tactic = models.CharField(max_length=16, default="Balanced")
+    slots = models.JSONField(
+        default=dict,
+        help_text=(
+            "Maps slot index (0-10, 0 is always GK) to the BallInstance id "
+            "placed in that slot."
+        ),
+    )
+    is_active = models.BooleanField(
+        default=False, help_text="Whether this is the player's active match team"
+    )
+    created_at = models.DateTimeField(auto_now_add=True, editable=False)
+    updated_at = models.DateTimeField(auto_now=True, editable=False)
+
+    def __str__(self) -> str:
+        return f"{self.name} ({self.player_id})"
+
+    class Meta:
+        managed = True
+        db_table = "xiteam"
+        unique_together = ("player", "name")
+
+
+class MatchGame(models.Model):
+    """A single simulated Starting XI match between two players."""
+
+    class Status(models.TextChoices):
+        PENDING = "pending", "Pending"
+        DECLINED = "declined", "Declined"
+        EXPIRED = "expired", "Expired"
+        COMPLETED = "completed", "Completed"
+
+    guild_id = models.BigIntegerField(help_text="Discord guild ID the match was played in")
+    channel_id = models.BigIntegerField(null=True, blank=True)
+    player1 = models.ForeignKey(Player, on_delete=models.CASCADE, related_name="matches_as_p1")
+    player1_id: int
+    player2 = models.ForeignKey(Player, on_delete=models.CASCADE, related_name="matches_as_p2")
+    player2_id: int
+    team1 = models.ForeignKey(XiTeam, on_delete=models.SET_NULL, null=True, related_name="+")
+    team1_id: int | None
+    team2 = models.ForeignKey(XiTeam, on_delete=models.SET_NULL, null=True, related_name="+")
+    team2_id: int | None
+    score1 = models.SmallIntegerField(default=0)
+    score2 = models.SmallIntegerField(default=0)
+    status = models.CharField(max_length=16, choices=Status.choices, default=Status.PENDING)
+    created_at = models.DateTimeField(auto_now_add=True, editable=False)
+    completed_at = models.DateTimeField(null=True, blank=True)
+
+    def __str__(self) -> str:
+        return f"Match #{self.pk}: {self.player1_id} vs {self.player2_id}"
+
+    class Meta:
+        managed = True
+        db_table = "matchgame"
+
+
+class MatchEvent(models.Model):
+    """A single narrated event (goal, miss, save, card...) inside a MatchGame."""
+
+    class EventType(models.TextChoices):
+        GOAL = "goal", "Goal"
+        MISS = "miss", "Miss"
+        SAVE = "save", "Save"
+        CARD = "card", "Card"
+        FOUL = "foul", "Foul"
+
+    match = models.ForeignKey(MatchGame, on_delete=models.CASCADE, related_name="events")
+    match_id: int
+    minute = models.SmallIntegerField()
+    event_type = models.CharField(max_length=8, choices=EventType.choices)
+    team = models.ForeignKey(XiTeam, on_delete=models.SET_NULL, null=True, related_name="+")
+    team_id: int | None
+    ball_instance = models.ForeignKey(
+        BallInstance, on_delete=models.SET_NULL, null=True, related_name="+"
+    )
+    ball_instance_id: int | None
+    related_ball_instance = models.ForeignKey(
+        BallInstance, on_delete=models.SET_NULL, null=True, blank=True, related_name="+"
+    )
+    related_ball_instance_id: int | None
+    description = models.TextField()
+    order = models.SmallIntegerField(default=0, help_text="Tie-break ordering within a minute")
+
+    class Meta:
+        managed = True
+        db_table = "matchevent"
+        ordering = ["minute", "order"]

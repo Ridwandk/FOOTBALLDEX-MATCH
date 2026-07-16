@@ -159,6 +159,11 @@ class Ball(models.Model):
         description="Rarity of this ball. "
         "Higher number means more likely to spawn, 0 is unspawnable."
     )
+    position = fields.CharField(
+        max_length=4,
+        default="N/A",
+        description="Footballer's position, used for the Starting XI match system",
+    )
     enabled = fields.BooleanField(
         default=True, description="Disabled balls will never spawn or show up in completion."
     )
@@ -604,3 +609,106 @@ class Block(models.Model):
 
     def __str__(self) -> str:
         return str(self.pk)
+
+
+class XiTeam(models.Model):
+    """A saved Starting XI team, built via the /xi command group."""
+
+    id: int
+    player_id: int
+
+    player: fields.ForeignKeyRelation[Player] = fields.ForeignKeyField(
+        "models.Player", related_name="xi_teams"
+    )
+    name = fields.CharField(max_length=32, description="Name given to this saved team")
+    formation = fields.CharField(max_length=16, default="4-3-3")
+    tactic = fields.CharField(max_length=16, default="Balanced")
+    slots = fields.JSONField(
+        default=dict,
+        description=(
+            "Maps slot index (0-10, 0 is always GK) to the BallInstance id placed in that slot."
+        ),
+    )
+    is_active = fields.BooleanField(
+        default=False, description="Whether this is the player's active match team"
+    )
+    created_at = fields.DatetimeField(auto_now_add=True)
+    updated_at = fields.DatetimeField(auto_now=True)
+
+    class Meta:
+        table = "xiteam"
+        unique_together = ("player", "name")
+
+    def __str__(self) -> str:
+        return f"{self.name} ({self.player_id})"
+
+
+class MatchGame(models.Model):
+    """A single simulated Starting XI match between two players."""
+
+    id: int
+    player1_id: int
+    player2_id: int
+    team1_id: int | None
+    team2_id: int | None
+
+    guild_id = fields.BigIntField(description="Discord guild ID the match was played in")
+    channel_id = fields.BigIntField(null=True)
+    player1: fields.ForeignKeyRelation[Player] = fields.ForeignKeyField(
+        "models.Player", related_name="matches_as_p1"
+    )
+    player2: fields.ForeignKeyRelation[Player] = fields.ForeignKeyField(
+        "models.Player", related_name="matches_as_p2"
+    )
+    team1: fields.ForeignKeyRelation[XiTeam] | None = fields.ForeignKeyField(
+        "models.XiTeam", null=True, on_delete=fields.SET_NULL, related_name="matches_as_team1"
+    )
+    team2: fields.ForeignKeyRelation[XiTeam] | None = fields.ForeignKeyField(
+        "models.XiTeam", null=True, on_delete=fields.SET_NULL, related_name="matches_as_team2"
+    )
+    score1 = fields.SmallIntField(default=0)
+    score2 = fields.SmallIntField(default=0)
+    status = fields.CharField(max_length=16, default="pending")
+    created_at = fields.DatetimeField(auto_now_add=True)
+    completed_at = fields.DatetimeField(null=True)
+
+    events: fields.ReverseRelation["MatchEvent"]
+
+    class Meta:
+        table = "matchgame"
+
+    def __str__(self) -> str:
+        return f"Match #{self.pk}: {self.player1_id} vs {self.player2_id}"
+
+
+class MatchEvent(models.Model):
+    """A single narrated event (goal, miss, save, card...) inside a MatchGame."""
+
+    id: int
+    match_id: int
+    team_id: int | None
+    ball_instance_id: int | None
+    related_ball_instance_id: int | None
+
+    match: fields.ForeignKeyRelation[MatchGame] = fields.ForeignKeyField(
+        "models.MatchGame", related_name="events"
+    )
+    minute = fields.SmallIntField()
+    event_type = fields.CharField(max_length=8)
+    team: fields.ForeignKeyRelation[XiTeam] | None = fields.ForeignKeyField(
+        "models.XiTeam", null=True, on_delete=fields.SET_NULL, related_name="match_events"
+    )
+    ball_instance: fields.ForeignKeyRelation[BallInstance] | None = fields.ForeignKeyField(
+        "models.BallInstance", null=True, on_delete=fields.SET_NULL,
+        related_name="match_events_as_scorer"
+    )
+    related_ball_instance: fields.ForeignKeyRelation[BallInstance] | None = fields.ForeignKeyField(
+        "models.BallInstance", null=True, on_delete=fields.SET_NULL,
+        related_name="match_events_as_related"
+    )
+    description = fields.TextField()
+    order = fields.SmallIntField(default=0, description="Tie-break ordering within a minute")
+
+    class Meta:
+        table = "matchevent"
+        ordering = ["minute", "order"]

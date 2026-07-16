@@ -1,0 +1,102 @@
+{% extends "admin/base_site.html" %}
+{% load static %}
+
+{% block extrahead %}
+  {{ block.super }}
+  <script src="{% static 'admin/js/vendor/jquery/jquery.js' %}"></script>
+  <script src="{% static 'admin/js/jquery.init.js' %}"></script>
+  <script src="{% url 'admin:jsi18n' %}"></script>
+  {{ form.media }}
+  <style>
+    .position-tabs {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 4px;
+      margin: 15px 0;
+      border-bottom: 1px solid var(--border-color, #ccc);
+      padding-bottom: 0;
+    }
+    .position-tab-btn {
+      cursor: pointer;
+      border: 1px solid var(--border-color, #ccc);
+      border-bottom: none;
+      background: var(--darkened-bg, #f2f2f2);
+      color: inherit;
+      padding: 8px 14px;
+      font-size: 13px;
+      border-radius: 4px 4px 0 0;
+    }
+    .position-tab-btn.active {
+      background: var(--body-bg, #fff);
+      font-weight: bold;
+      border-bottom: 1px solid var(--body-bg, #fff);
+      margin-bottom: -1px;
+    }
+    .position-tab-panel { display: none; }
+    .position-tab-panel fieldset { margin-top: 0; }
+  </style>
+{% endblock %}
+
+{% block content %}
+  <h1>{{ title }}</h1>
+  <p>
+    Pick a tab, search and move players across, repeat for as many positions as you want,
+    then hit <strong>Assign positions</strong> once at the bottom - it applies every tab at
+    once. Anything left on the "Available" side of every tab when you submit gets set to
+    <strong>Not Assigned</strong>, so re-opening this page later shows your current
+    assignments already pre-loaded and you only need to touch what changed.
+  </p>
+  <form method="post">
+    {% csrf_token %}
+    {{ form.non_field_errors }}
+
+    <div class="position-tabs">
+      {% for field in form %}
+        <button type="button" class="position-tab-btn{% if forloop.first %} active{% endif %}"
+                data-target="tab-panel-{{ field.name }}">{{ field.label }}</button>
+      {% endfor %}
+    </div>
+
+    {% for field in form %}
+      <div class="position-tab-panel{% if forloop.first %} active{% endif %}"
+           id="tab-panel-{{ field.name }}">
+        <fieldset class="module aligned">
+          <h2>{{ field.label }}</h2>
+          {{ field.errors }}
+          {{ field }}
+        </fieldset>
+      </div>
+    {% endfor %}
+
+    <div class="submit-row">
+      <input type="submit" value="Assign positions" class="default" />
+    </div>
+  </form>
+
+  <script>
+    document.addEventListener('DOMContentLoaded', function () {
+      var buttons = document.querySelectorAll('.position-tab-btn');
+      var panels = document.querySelectorAll('.position-tab-panel');
+
+      function activate(targetId) {
+        panels.forEach(function (panel) {
+          panel.classList.toggle('active', panel.id === targetId);
+          panel.style.display = panel.id === targetId ? 'block' : 'none';
+        });
+        buttons.forEach(function (btn) {
+          btn.classList.toggle('active', btn.dataset.target === targetId);
+        });
+      }
+
+      buttons.forEach(function (btn) {
+        btn.addEventListener('click', function () {
+          activate(btn.dataset.target);
+        });
+      });
+
+      if (panels.length) {
+        activate(panels[0].id);
+      }
+    });
+  </script>
+{% endblock %}

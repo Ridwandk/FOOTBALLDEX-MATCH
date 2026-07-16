@@ -1,18 +1,21 @@
 from typing import TYPE_CHECKING, Any
 
-from django.contrib import admin
+from django.contrib import admin, messages
 from django.contrib.admin.utils import quote
 from django.forms import Textarea
-from django.urls import reverse
+from django.shortcuts import redirect, render
+from django.urls import path, reverse
 from django.utils.html import format_html
 from django.utils.safestring import mark_safe
 from django.utils.text import capfirst
+from django_admin_action_forms import action_with_form
 
-from ..models import Ball, BallInstance, Economy, Regime, TradeObject, transform_media
+from ..models import Ball, BallInstance, Economy, Position, Regime, TradeObject, transform_media
+from ..position_forms import AssignPositionActionForm, BulkPositionForm
 
 if TYPE_CHECKING:
     from django.db.models import Field, Model, QuerySet
-    from django.http import HttpRequest
+    from django.http import HttpRequest, HttpResponse
 
 
 @admin.register(Regime)
@@ -83,6 +86,7 @@ class EconomyAdmin(admin.ModelAdmin):
 
 @admin.register(Ball)
 class BallAdmin(admin.ModelAdmin):
+    change_list_template = "admin/bd_models/ball/change_list.html"
     autocomplete_fields = ("regime", "economy")
     readonly_fields = ("collection_image", "spawn_image")
     save_on_top = True
@@ -95,6 +99,7 @@ class BallAdmin(admin.ModelAdmin):
                     "health",
                     "attack",
                     "rarity",
+                    "position",
                     "emoji_id",
                     "economy",
                     "regime",
@@ -143,6 +148,7 @@ class BallAdmin(admin.ModelAdmin):
         "country",
         "pk",
         "emoji",
+        "position",
         "rarity",
         "capacity_name",
         "health",
@@ -150,8 +156,9 @@ class BallAdmin(admin.ModelAdmin):
         "enabled",
     ]
     list_editable = ["enabled", "rarity"]
-    list_filter = ["enabled", "tradeable", "regime", "economy", "created_at"]
+    list_filter = ["position", "enabled", "tradeable", "regime", "economy", "created_at"]
     ordering = ["-created_at"]
+    actions = ["assign_position", "clear_position"]
 
     search_fields = [
         "country",
@@ -166,6 +173,67 @@ class BallAdmin(admin.ModelAdmin):
         "Search for countryball name, ID, ability name/content, "
         "credits, catch names or translations"
     )
+
+    def get_urls(self):
+        custom_urls = [
+            path(
+                "bulk-positions/",
+                self.admin_site.admin_view(self.bulk_positions_view),
+                name="bd_models_ball_bulk_positions",
+            ),
+        ]
+        return custom_urls + super().get_urls()
+
+    def bulk_positions_view(self, request: "HttpRequest") -> "HttpResponse":
+        if not self.has_change_permission(request):
+            messages.error(request, "You don't have permission to edit players' positions.")
+            return redirect("..")
+
+        if request.method == "POST":
+            form = BulkPositionForm(request.POST)
+            if form.is_valid():
+                assigned_count, cleared_count = form.save()
+                self.message_user(
+                    request,
+                    f"Assigned {assigned_count} position change(s); "
+                    f"{cleared_count} player(s) set to Not Assigned.",
+                    messages.SUCCESS,
+                )
+                return redirect("..")
+        else:
+            form = BulkPositionForm()
+
+        context = {
+            **self.admin_site.each_context(request),
+            "title": "Bulk-assign player positions",
+            "form": form,
+            "opts": self.model._meta,
+        }
+        return render(request, "admin/bd_models/ball/bulk_positions.html", context)
+
+    @action_with_form(
+        AssignPositionActionForm, description="Assign position to selected footballers"
+    )  # type: ignore
+    def assign_position(
+        self, request: "HttpRequest", queryset: "QuerySet[Ball]", data: dict[str, Any]
+    ):
+        position = data["position"]
+        count = queryset.update(position=position)
+        label = Position(position).label
+        self.message_user(
+            request,
+            f"Set {count} footballer{'s' if count != 1 else ''} to {label}.",
+            messages.SUCCESS,
+        )
+
+    @admin.action(description="Reset selected footballers to Not Assigned")
+    def clear_position(self, request: "HttpRequest", queryset: "QuerySet[Ball]"):
+        count = queryset.update(position=Position.NA)
+        self.message_user(
+            request,
+            f"Reset {count} footballer{'s' if count != 1 else ''} to Not Assigned.",
+            messages.SUCCESS,
+        )
 
     @admin.display(description="Emoji")
     def emoji(self, obj: Ball):
