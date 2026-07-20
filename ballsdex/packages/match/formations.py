@@ -87,18 +87,6 @@ FORMATIONS: dict[str, list[list[str]]] = {
         ["LM", "CM", "CM", "RM"],
         ["ST", "ST"],
     ],
-    "4-2-3-1": [
-        ["LB", "CB", "CB", "RB"],
-        ["CDM", "CDM"],
-        ["LW", "CAM", "RW"],
-        ["ST"],
-    ],
-    "4-1-4-1": [
-        ["LB", "CB", "CB", "RB"],
-        ["CDM"],
-        ["LM", "CM", "CM", "RM"],
-        ["ST"],
-    ],
     "3-5-2": [
         ["CB", "CB", "CB"],
         ["LM", "CM", "CM", "CM", "RM"],

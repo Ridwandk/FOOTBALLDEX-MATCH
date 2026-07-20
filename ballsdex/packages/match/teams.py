@@ -6,11 +6,12 @@ XI builder commands and the match simulator so the two never drift apart.
 
 from __future__ import annotations
 
+import asyncio
 from typing import TYPE_CHECKING
 
 from ballsdex.core.models import BallInstance
+from ballsdex.packages.match.emoji_cache import get_emoji_image
 from ballsdex.packages.match.formations import get_formation_slots
-from ballsdex.packages.match.render import load_artwork
 from ballsdex.packages.match.sim import RosterEntry
 
 if TYPE_CHECKING:
@@ -51,8 +52,11 @@ async def build_render_payload(
     formation: str, slots: dict[str, int]
 ) -> dict[int, tuple[BallInstance, "Image | None"]]:
     instances_by_slot = await load_instances(slots)
-    payload: dict[int, tuple[BallInstance, "Image | None"]] = {}
-    for slot_index, instance in instances_by_slot.items():
-        artwork = load_artwork(instance)
-        payload[slot_index] = (instance, artwork)
-    return payload
+    slot_indexes = list(instances_by_slot.keys())
+    faces = await asyncio.gather(
+        *(get_emoji_image(instances_by_slot[i].countryball.emoji_id) for i in slot_indexes)
+    )
+    return {
+        slot_index: (instances_by_slot[slot_index], face)
+        for slot_index, face in zip(slot_indexes, faces)
+    }

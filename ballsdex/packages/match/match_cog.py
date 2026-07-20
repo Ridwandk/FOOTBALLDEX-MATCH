@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import logging
 from typing import TYPE_CHECKING
 
@@ -90,6 +91,9 @@ class Match(commands.GroupCog, name="match"):
     """
     Challenge another player to a Starting XI match.
     """
+
+    # Seconds to wait between revealing each key event during the live animation.
+    EVENT_DELAY = 2.5
 
     def __init__(self, bot: "BallsDexBot"):
         self.bot = bot
@@ -222,8 +226,56 @@ class Match(commands.GroupCog, name="match"):
         if events_to_create:
             await MatchEvent.bulk_create(events_to_create)
 
-        embed = self._build_result_embed(team1, team2, result, match.id)
-        await interaction.followup.send(embed=embed)
+        final_embed = self._build_result_embed(team1, team2, result, match.id)
+        await self._animate_match(interaction, team1, team2, result, final_embed)
+
+    async def _animate_match(
+        self,
+        interaction: discord.Interaction["BallsDexBot"],
+        team1: XiTeam,
+        team2: XiTeam,
+        result,
+        final_embed: discord.Embed,
+    ) -> None:
+        """Reveal key events one by one on a single message, then swap in the full result."""
+        key_events = [e for e in result.events if e.event_type in ("goal", "save", "card")]
+
+        live_embed = discord.Embed(
+            title=f"\u26bd {team1.name} 0 - 0 {team2.name}",
+            description="Kick off! \U0001f3c1",
+            color=discord.Color.orange(),
+        )
+        message = await interaction.followup.send(embed=live_embed)
+
+        lines: list[str] = []
+        score = [0, 0]
+        for e in key_events:
+            await asyncio.sleep(self.EVENT_DELAY)
+
+            team = team1 if e.team_index == 0 else team2
+            if e.event_type == "goal":
+                score[e.team_index] += 1
+
+            lines.append(
+                f"{e.minute}' {EVENT_ICONS.get(e.event_type, '')} "
+                f"{self._describe_event(e, team)}"
+            )
+            live_embed = discord.Embed(
+                title=f"\u26bd {team1.name} {score[0]} - {score[1]} {team2.name}",
+                description="\n".join(lines)[:4096],
+                color=discord.Color.orange(),
+            )
+            live_embed.set_footer(text="Match in progress\u2026")
+            try:
+                await message.edit(embed=live_embed)
+            except discord.HTTPException:
+                pass
+
+        await asyncio.sleep(self.EVENT_DELAY)
+        try:
+            await message.edit(embed=final_embed)
+        except discord.HTTPException:
+            await interaction.followup.send(embed=final_embed)
 
     @staticmethod
     def _describe_event(e, team: XiTeam) -> str:
