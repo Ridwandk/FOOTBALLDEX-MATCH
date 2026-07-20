@@ -1,9 +1,4 @@
-"""
-Renders the "Starting XI" pitch graphic. Empty slots show a plain circular
-placeholder with the position code. Filled slots show the footballer's
-Discord emoji fused directly into a plate with the position code underneath -
-one seamless card, no separate border ring.
-"""
+# Starting 11 Graphic Renderer
 
 from __future__ import annotations
 
