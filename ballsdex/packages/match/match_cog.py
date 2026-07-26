@@ -441,7 +441,7 @@ class Match(commands.GroupCog, name="match"):
                 name="\u2b50 Man of the Match", value=f"{name} ({team.name})", inline=False
             )
 
-        embed.set_footer(text=f"Fulltime U+1F6A8")
+        embed.set_footer(text=f"Fulltime")
         return embed
 
 

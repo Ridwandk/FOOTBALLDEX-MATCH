@@ -125,7 +125,7 @@ class Balls(app_commands.Group):
         try:
             for i in range(n):
                 if not countryball:
-                    ball = await countryball_cls.get_random(interaction.client)
+                    ball = await countryball_cls.get_random(interaction.client, respect_hidden_from_spawn=True)
                 else:
                     ball = countryball_cls(interaction.client, countryball)
                 ball.special = special
@@ -231,7 +231,7 @@ class Balls(app_commands.Group):
 
         await interaction.response.defer(ephemeral=True, thinking=True)
         if not countryball:
-            ball = await cog.countryball_cls.get_random(interaction.client)
+            ball = await cog.countryball_cls.get_random(interaction.client, respect_hidden_from_spawn=True)
         else:
             ball = cog.countryball_cls(interaction.client, countryball)
         ball.special = special
@@ -327,7 +327,9 @@ class Balls(app_commands.Group):
             for i in range(n):
                 if not countryball:
                     # Get random rare ball for each spawn
-                    rare_balls = await Ball.filter(rarity__gte=0.01, rarity__lte=2.5, enabled=True).all()
+                    rare_balls = await Ball.filter(
+                        rarity__gte=0.01, rarity__lte=2.5, enabled=True, hidden_from_spawn=False
+                    ).all()
                     if not rare_balls:
                         await interaction.followup.edit_message(
                             "@original",
@@ -370,7 +372,9 @@ class Balls(app_commands.Group):
         await interaction.response.defer(ephemeral=True, thinking=True)
         if not countryball:
             # Get random rare ball with rarity between 0.01 and 2.4
-            rare_balls = await Ball.filter(rarity__gte=0.01, rarity__lte=2.4, enabled=True).all()
+            rare_balls = await Ball.filter(
+                rarity__gte=0.01, rarity__lte=2.4, enabled=True, hidden_from_spawn=False
+            ).all()
             if not rare_balls:
                 await interaction.followup.send(
                     f"No rare {settings.plural_collectible_name} (rarity 0.03-2.4) are available.",
@@ -458,7 +462,9 @@ class Balls(app_commands.Group):
             return
 
         # Check if there are any balls available for the specified regime
-        regime_balls_count = await Ball.filter(regime_id=regime.pk, enabled=True, rarity__gt=0).count()
+        regime_balls_count = await Ball.filter(
+            regime_id=regime.pk, enabled=True, rarity__gt=0, hidden_from_spawn=False
+        ).count()
         if regime_balls_count == 0:
             await interaction.response.send_message(
                 f"No spawnable {settings.plural_collectible_name} found for regime **{regime.name}**. "
@@ -475,7 +481,9 @@ class Balls(app_commands.Group):
             
             for i in range(n):
                 # Get random ball from specified regime
-                regime_balls = await Ball.filter(regime_id=regime.pk, enabled=True, rarity__gt=0).all()
+                regime_balls = await Ball.filter(
+                    regime_id=regime.pk, enabled=True, rarity__gt=0, hidden_from_spawn=False
+                ).all()
                 if not regime_balls:
                     await interaction.followup.edit_message(
                         "@original",
@@ -517,7 +525,9 @@ class Balls(app_commands.Group):
         await interaction.response.defer(ephemeral=True, thinking=True)
         
         # Get a random ball from the specified regime
-        regime_balls = await Ball.filter(regime_id=regime.pk, enabled=True, rarity__gt=0).all()
+        regime_balls = await Ball.filter(
+            regime_id=regime.pk, enabled=True, rarity__gt=0, hidden_from_spawn=False
+        ).all()
         if not regime_balls:
             await interaction.followup.send(
                 f"No spawnable {settings.plural_collectible_name} found for regime **{regime.name}**.",

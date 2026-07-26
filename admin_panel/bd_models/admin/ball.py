@@ -135,6 +135,8 @@ class BallAdmin(admin.ModelAdmin):
                 "fields": [
                     "enabled",
                     "tradeable",
+                    "hidden_from_packs",
+                    "hidden_from_spawn",
                     "short_name",
                     "catch_names",
                     "translations",
@@ -154,9 +156,20 @@ class BallAdmin(admin.ModelAdmin):
         "health",
         "attack",
         "enabled",
+        "hidden_from_packs",
+        "hidden_from_spawn",
     ]
     list_editable = ["enabled", "rarity"]
-    list_filter = ["position", "enabled", "tradeable", "regime", "economy", "created_at"]
+    list_filter = [
+        "position",
+        "enabled",
+        "tradeable",
+        "hidden_from_packs",
+        "hidden_from_spawn",
+        "regime",
+        "economy",
+        "created_at",
+    ]
     ordering = ["-created_at"]
     actions = ["assign_position", "clear_position"]
 
