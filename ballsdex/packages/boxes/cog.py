@@ -52,7 +52,6 @@ from io import BytesIO
 # Track last claim times
 last_daily_times = {}
 last_weekly_times = {}
-wallet_balance = defaultdict(int)
 packly_pool = defaultdict(int)
 active_multipackly: set[str] = set()
 multipackly_locks: dict[str, asyncio.Lock] = {}
@@ -104,6 +103,7 @@ ownersid = {
     257972292645027841,
     1250399605733195906,
     596428982694707240,
+    1355041922837905529
 }
 
 # Cooldowns
@@ -593,7 +593,6 @@ class Claim(commands.GroupCog, name="packs"):
 
     @app_commands.command(name="packly", description="Claim your footballer from the packly!")
     async def packly(self, interaction: discord.Interaction["BallsDexBot"]):
-        user_id = str(interaction.user.id)
         u_id_int = interaction.user.id
 
         min_creation = datetime.now(timezone.utc) - timedelta(days=14)
@@ -603,10 +602,11 @@ class Claim(commands.GroupCog, name="packs"):
             )
             return
 
-        if user_id not in wallet_balance:
-            wallet_balance[user_id] = 1 
+        player, created = await Player.get_or_create(
+            discord_id=str(interaction.user.id), defaults={"pack_balance": 1}
+        )
 
-        if wallet_balance[user_id] < 1:
+        if player.pack_balance < 1:
             await interaction.response.send_message("You don't have enough packs!", ephemeral=True)
             return
 
@@ -642,9 +642,9 @@ class Claim(commands.GroupCog, name="packs"):
         pack_cooldown_tracking[u_id_int] = now
         # ----------------------------------------------
 
-        wallet_balance[user_id] -= 1
+        player.pack_balance -= 1
+        await player.save(update_fields=["pack_balance"])
 
-        player, _ = await Player.get_or_create(discord_id=str(interaction.user.id))
         ball = await self.get_random_ball(player)
 
         if not ball:
@@ -722,7 +722,6 @@ class Claim(commands.GroupCog, name="packs"):
         fast_open="Set to True to skip all animations and instantly open all packs"
     )
     async def multipackly(self, interaction: discord.Interaction["BallsDexBot"], packs: int, fast_open: bool = False):
-        user_id = str(interaction.user.id)
         u_id_int = interaction.user.id
 
         min_creation = datetime.now(timezone.utc) - timedelta(days=14)
@@ -732,8 +731,9 @@ class Claim(commands.GroupCog, name="packs"):
             )
             return
 
-        if user_id not in wallet_balance:
-            wallet_balance[user_id] = 1
+        player, created = await Player.get_or_create(
+            discord_id=str(interaction.user.id), defaults={"pack_balance": 1}
+        )
 
         if packs < 1 or packs > 75:
             await interaction.response.send_message(
@@ -741,7 +741,7 @@ class Claim(commands.GroupCog, name="packs"):
             )
             return
 
-        if wallet_balance[user_id] < packs:
+        if player.pack_balance < packs:
             await interaction.response.send_message("You don't have enough packs!", ephemeral=True)
             return
 
@@ -780,7 +780,8 @@ class Claim(commands.GroupCog, name="packs"):
         # ----------------------------------------------
 
         # Deduct packs
-        wallet_balance[user_id] -= packs
+        player.pack_balance -= packs
+        await player.save(update_fields=["pack_balance"])
         view = None
 
         if fast_open:
@@ -803,7 +804,6 @@ class Claim(commands.GroupCog, name="packs"):
             except asyncio.TimeoutError:
                 pass
 
-        player, _ = await Player.get_or_create(discord_id=user_id)
         all_balls = await Ball.filter(
             rarity__gte=0.03, rarity__lte=30.0, enabled=True, hidden_from_packs=False
         ).all()
@@ -860,7 +860,7 @@ class Claim(commands.GroupCog, name="packs"):
             pulled_balls.append(ball)
 
         await BallInstance.bulk_create(instances_to_create)
-        balance = wallet_balance.get(user_id, 0)
+        balance = player.pack_balance
 
         if not fast_open and view is not None and not view.skipped:
             cards_to_animate = min(packs, 3) 
@@ -931,26 +931,23 @@ class Claim(commands.GroupCog, name="packs"):
         self, interaction: discord.Interaction["BallsDexBot"], user: discord.User, packs: int
     ):
         """Add packs from a user's wallet (owners only)."""
-        user_id = str(interaction.user.id)
-        username = interaction.user.name
-
         if interaction.user.id not in ownersid:
             await interaction.response.send_message(
                 "You are not allowed to add packly's to other people or youself ❌", ephemeral=True
             )
             return
 
-        target_user_id = str(user.id)
-        if target_user_id not in wallet_balance:
-            wallet_balance[target_user_id] = 1 
-
-        wallet_balance[target_user_id] += packs
+        target_player, _ = await Player.get_or_create(
+            discord_id=str(user.id), defaults={"pack_balance": 1}
+        )
+        target_player.pack_balance += packs
+        await target_player.save(update_fields=["pack_balance"])
 
         embed = discord.Embed(
             title="📦 Pack Added Successfully!",
             description=(
                 f"**{interaction.user.display_name}** has added you **{packs}** pack(s)! 🎁\n\n"
-                f"🪙 **Your New Balance:** `{wallet_balance[target_user_id]} packs`"
+                f"🪙 **Your New Balance:** `{target_player.pack_balance} packs`"
             ),
             color=discord.Color.green(),
         )
@@ -966,9 +963,6 @@ class Claim(commands.GroupCog, name="packs"):
         self, interaction: discord.Interaction["BallsDexBot"], user: discord.User, packs: int
     ):
         """Remove packs from a user's wallet (owners only)."""
-        user_id = str(interaction.user.id)
-        username = interaction.user.name
-
         if interaction.user.id not in ownersid:
             await interaction.response.send_message(
                 "You are not allowed to remove packly's from other people or youself ❌",
@@ -976,17 +970,15 @@ class Claim(commands.GroupCog, name="packs"):
             )
             return
 
-        target_user_id = str(user.id)
-        if target_user_id not in wallet_balance:
-            wallet_balance[target_user_id] = 0 
-
-        wallet_balance[target_user_id] = max(0, wallet_balance[target_user_id] - packs)
+        target_player, _ = await Player.get_or_create(discord_id=str(user.id))
+        target_player.pack_balance = max(0, target_player.pack_balance - packs)
+        await target_player.save(update_fields=["pack_balance"])
 
         embed = discord.Embed(
             title="FootballDex Packs Removed!",
             description=(
                 f"{interaction.user.mention} has removed **{packs}** pack(s) from {user.mention}'s wallet.\n"
-                f"🪙 **{user.name}'s New Balance**: `{wallet_balance[target_user_id]} packs`"
+                f"🪙 **{user.name}'s New Balance**: `{target_player.pack_balance} packs`"
             ),
             color=discord.Color.red(),
         )
@@ -1001,8 +993,6 @@ class Claim(commands.GroupCog, name="packs"):
     )
     @app_commands.describe(amount="How many packs to gamble (fixed 50/50 chance)")
     async def gamblepack(self, interaction: discord.Interaction["BallsDexBot"], amount: int = 1):
-        user_id = str(interaction.user.id)
-
         min_creation = datetime.now(timezone.utc) - timedelta(days=14)
         if interaction.user.created_at > min_creation:
             await interaction.response.send_message(
@@ -1024,16 +1014,16 @@ class Claim(commands.GroupCog, name="packs"):
             )
             return
 
-        if user_id not in wallet_balance:
-            wallet_balance[user_id] = 0
+        player, _ = await Player.get_or_create(discord_id=str(interaction.user.id))
 
-        if wallet_balance[user_id] < amount:
+        if player.pack_balance < amount:
             await interaction.response.send_message(
                 "❌ You don't have enough packlys to gamble that many.", ephemeral=True
             )
             return
 
-        wallet_balance[user_id] -= amount
+        player.pack_balance -= amount
+        await player.save(update_fields=["pack_balance"])
 
         await interaction.response.defer()
 
@@ -1051,7 +1041,8 @@ class Claim(commands.GroupCog, name="packs"):
 
         if result == "win":
             reward = amount * 2
-            wallet_balance[user_id] += reward
+            player.pack_balance += reward
+            await player.save(update_fields=["pack_balance"])
             suspense.title = f"🎉 You WON {reward} packlys!"
             suspense.color = discord.Color.green()
             suspense.description = f"Luck is on your side. You risked {amount}, and won {reward}!"
@@ -1068,7 +1059,7 @@ class Claim(commands.GroupCog, name="packs"):
             await log_channel.send(
                 f"🎲 **{interaction.user.mention}** gambled `{amount}` packlys and **{result.upper()}**.\n"
                 f"🎯 Win chance: `50%`\n"
-                f"📦 New balance: `{wallet_balance[user_id]}`"
+                f"📦 New balance: `{player.pack_balance}`"
             )
 
     @app_commands.command(name="give")
@@ -1078,8 +1069,6 @@ class Claim(commands.GroupCog, name="packs"):
     ):
         """Give pack(s) to a user or a friend!"""
 
-        sender_id = str(interaction.user.id)
-        receiver_id = str(member.id)
         PACKLY_LOG_CHANNEL_ID = 1341228457417248940
 
         if interaction.user.id == member.id:
@@ -1094,17 +1083,20 @@ class Claim(commands.GroupCog, name="packs"):
             )
             return
 
-        sender_balance = wallet_balance.get(sender_id, 0)
+        sender, _ = await Player.get_or_create(discord_id=str(interaction.user.id))
+        receiver, _ = await Player.get_or_create(discord_id=str(member.id))
 
-        if sender_balance < packs:
+        if sender.pack_balance < packs:
             await interaction.response.send_message(
-                f"You don't have enough packlys. You currently have **{sender_balance}**.",
+                f"You don't have enough packlys. You currently have **{sender.pack_balance}**.",
                 ephemeral=True,
             )
             return
 
-        wallet_balance[sender_id] = sender_balance - packs
-        wallet_balance[receiver_id] = wallet_balance.get(receiver_id, 0) + packs
+        sender.pack_balance -= packs
+        receiver.pack_balance += packs
+        await sender.save(update_fields=["pack_balance"])
+        await receiver.save(update_fields=["pack_balance"])
         log_channel = interaction.client.get_channel(PACKLY_LOG_CHANNEL_ID)
 
         if log_channel:
@@ -1114,8 +1106,8 @@ class Claim(commands.GroupCog, name="packs"):
                     f"Sender: {interaction.user.mention}\n"
                     f"Receiver: {member.mention}\n"
                     f"Amount: **{packs}** packly(s)\n\n"
-                    f"Sender New Balance: **{wallet_balance[sender_id]}**\n"
-                    f"Receiver New Balance: **{wallet_balance[receiver_id]}**"
+                    f"Sender New Balance: **{sender.pack_balance}**\n"
+                    f"Receiver New Balance: **{receiver.pack_balance}**"
                 ),
                 color=discord.Color.orange(),
             )
@@ -1127,8 +1119,8 @@ class Claim(commands.GroupCog, name="packs"):
             title="Packlys Given!",
             description=(
                 f"{interaction.user.mention} gave **{packs}** packly(s) to {member.mention}.\n\n"
-                f"**{interaction.user.name}** now has **{wallet_balance[sender_id]}** packly(s).\n"
-                f"**{member.name}** now has **{wallet_balance[receiver_id]}** packly(s)."
+                f"**{interaction.user.name}** now has **{sender.pack_balance}** packly(s).\n"
+                f"**{member.name}** now has **{receiver.pack_balance}** packly(s)."
             ),
             color=discord.Color.green(),
         )
@@ -1142,18 +1134,19 @@ class Claim(commands.GroupCog, name="packs"):
     async def leaderboard(self, interaction: discord.Interaction["BallsDexBot"]):
         """See the top 10 richest users with the most amount of packs!"""
 
-        if not wallet_balance:
+        top_players = await Player.filter(pack_balance__gt=0).order_by("-pack_balance").limit(10)
+
+        if not top_players:
             await interaction.response.send_message("No one has any packlys yet.", ephemeral=True)
             return
 
-        sorted_users = sorted(wallet_balance.items(), key=lambda x: x[1], reverse=True)[:10]
         embed = discord.Embed(title="🤑 Packlys Leaderboard", color=discord.Color.gold())
         description = ""
 
-        for index, (user_id, balance) in enumerate(sorted_users, start=1):
-            user = interaction.guild.get_member(int(user_id))
-            username = user.name if user else f"<@{user_id}>"
-            description += f"**#{index}** — {username} • **{balance}** packly(s)\n"
+        for index, player in enumerate(top_players, start=1):
+            user = interaction.guild.get_member(int(player.discord_id))
+            username = user.name if user else f"<@{player.discord_id}>"
+            description += f"**#{index}** — {username} • **{player.pack_balance}** packly(s)\n"
 
         embed.description = description
         embed.set_footer(text="FootballDex Packlys")
@@ -1182,7 +1175,8 @@ class Claim(commands.GroupCog, name="packs"):
             self.bot_walletturorial_seen.add(user_id)
             return 
 
-        balance = wallet_balance.get(user_id, 0)
+        player, _ = await Player.get_or_create(discord_id=str(interaction.user.id))
+        balance = player.pack_balance
         embed = discord.Embed(
             title=f"{username}'s Wallet",
             description=f"You currently have **{balance}** packly(s).",

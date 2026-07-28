@@ -486,6 +486,11 @@ class Player(models.Model):
         description="How you want to handle trade accept cooldown",
         default=TradeCooldownPolicy.COOLDOWN,
     )
+    pack_balance = fields.IntField(
+        default=0,
+        description="Persistent pack currency balance, spent by /packs commands "
+        "(packly, multipackly, gamblepack). Survives bot restarts.",
+    )
     extra_data = fields.JSONField(default=dict)
     balls: fields.BackwardFKRelation[BallInstance]
 

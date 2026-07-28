@@ -86,6 +86,11 @@ class Player(models.Model):
     trade_cooldown_policy = models.SmallIntegerField(
         choices=TradeCooldownPolicy.choices, help_text="To bypass or not the trade cooldown"
     )
+    pack_balance = models.IntegerField(
+        default=0,
+        help_text="Persistent pack currency balance, spent by /packs commands "
+        "(packly, multipackly, gamblepack). Survives bot restarts.",
+    )
     extra_data = models.JSONField(blank=True, default=dict)
 
     def is_blacklisted(self) -> bool:
