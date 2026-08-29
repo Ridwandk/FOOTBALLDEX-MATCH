@@ -22,6 +22,7 @@ from ballsdex.core.utils.transformers import (
     RegimeTransform,
     SpecialTransform,
     BallEnabledTransform,
+    SpecialEnabledTransform,
 )
 from ballsdex.settings import settings
 
@@ -860,6 +861,97 @@ class Balls(app_commands.Group):
             f"from {from_user.id} to {user.id}.",
             interaction.client,
         )
+
+            @app_commands.command(name="transfer_filtered")
+    @app_commands.checks.has_any_role(*settings.root_role_ids)
+    async def transfer_filtered(
+        self,
+        interaction: discord.Interaction["BallsDexBot"],
+        from_user: discord.User,
+        user: discord.User,
+        footballer: BallEnabledTransform | None = None,
+        special: SpecialEnabledTransform | None = None,
+        only_non_specials: bool = False,
+    ):
+        """
+        Transfer items from one user to another, with optional filters for dex and specials.
+
+        Parameters
+        ----------
+        from_user: discord.User
+            The user whose items will be transferred.
+        user: discord.User
+            The user receiving the items.
+        footballer: BallEnabledTransform
+            Optional. Only transfer this specific footballer (Dex).
+        special: SpecialEnabledTransform
+            Optional. Only transfer items with this specific special.
+        only_non_specials: bool
+            If True, only items WITHOUT a special will be transferred.
+        """
+
+        await interaction.response.defer(ephemeral=True)
+
+        if from_user.id == user.id:
+            await interaction.followup.send(
+                "⚠️ You cannot transfer items to the same user.",
+                ephemeral=True,
+            )
+            return
+
+        oldPlayer = await Player.get_or_none(discord_id=from_user.id)
+        newPlayer, _ = await Player.get_or_create(discord_id=user.id)
+
+        if not oldPlayer:
+            await interaction.followup.send(
+                "❌ Source player not found in the database.",
+                ephemeral=True,
+            )
+            return
+
+        # Base query to target the old player's inventory
+        query = BallInstance.filter(player=oldPlayer)
+
+        # Filter by a specific footballer (Dex) if provided
+        if footballer:
+            query = query.filter(ball=footballer)
+
+        # Filter by a specific special, or explicitly filter out all specials
+        if special:
+            query = query.filter(special=special)
+        elif only_non_specials:
+            query = query.filter(special_id__isnull=True)
+
+        # Perform the bulk update query directly in the database
+        transferred = await query.update(player=newPlayer)
+
+        if not transferred:
+            await interaction.followup.send(
+                "⚠️ No items matching those filters were found in their inventory.",
+                ephemeral=True,
+            )
+            return
+
+        # Construct the success message dynamically based on applied filters
+        msg_lines = [f"✅ Transferred **{transferred} items** from `{oldPlayer.discord_id}` to `{newPlayer.discord_id}`."]
+
+        if footballer:
+            # Depending on your base model name, this might be `footballer.country` or `footballer.name`
+            msg_lines.append(f"• **Dex Filter:** {getattr(footballer, 'country', getattr(footballer, 'name', str(footballer)))}")
+        if special:
+            msg_lines.append(f"• **Special Filter:** {special.name}")
+        if only_non_specials:
+            msg_lines.append("• **Specials Excluded:** Only normal items transferred")
+
+        await interaction.followup.send("\n".join(msg_lines), ephemeral=True)
+
+        await log_action(
+            f"{interaction.user} transferred {transferred} filtered items "
+            f"(Dex: {footballer}, Special: {special}, Non-Special Only: {only_non_specials}) "
+            f"from {from_user.id} to {user.id}.",
+            interaction.client,
+        )
+
 
     @app_commands.command(name="gdrop", description="Drop any footballer.")
     @app_commands.checks.has_any_role(*settings.root_role_ids)
